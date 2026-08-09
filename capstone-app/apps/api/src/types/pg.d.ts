@@ -4,7 +4,12 @@ declare module "pg" {
       connectionString?: string;
       ssl?: boolean | { rejectUnauthorized?: boolean };
     });
-    query<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }>;
+    on(event: "connect", listener: () => void): void;
+    on(event: "error", listener: (error: Error) => void): void;
+    query<T = any>(
+      text: string,
+      params?: any[]
+    ): Promise<{ rows: T[] }>;
     end(): Promise<void>;
   }
 }
