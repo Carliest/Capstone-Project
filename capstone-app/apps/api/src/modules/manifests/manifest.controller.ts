@@ -41,7 +41,7 @@ export async function createManifest(req: Request, res: Response) {
       manifest_room_code,
       climb_date,
       booking_status
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
     [
       manifestId,
