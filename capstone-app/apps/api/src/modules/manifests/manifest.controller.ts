@@ -19,6 +19,34 @@ function generateRoomCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
+async function findBookableTrailById(trailId: string) {
+  const result = await query<{
+    trail_id: string;
+    trail_name: string;
+    mountain_id: string;
+    mountain_name: string;
+    active_safety_status: string;
+    daily_carrying_capacity: number;
+    current_trail_occupancy: number;
+  }>(
+    `SELECT
+      trail_id,
+      trail_name,
+      mountain_id,
+      mountain_name,
+      active_safety_status,
+      daily_carrying_capacity,
+      current_trail_occupancy
+     FROM trail
+     LEFT JOIN mountain USING (mountain_id)
+     WHERE trail_id = $1
+     LIMIT 1`,
+    [trailId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function createManifest(req: Request, res: Response) {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -28,6 +56,31 @@ export async function createManifest(req: Request, res: Response) {
   const authReq = req as AuthenticatedRequest;
   if (!authReq.auth) {
     return sendError(res, "Authentication required", 401);
+  }
+
+  const trail = await findBookableTrailById(parsed.data.trailId);
+  if (!trail) {
+    return sendError(
+      res,
+      "No trail is available for this ID. Please create or select an existing trail first.",
+      404
+    );
+  }
+
+  if (trail.active_safety_status !== "open") {
+    return sendError(
+      res,
+      "That trail is currently not open for booking.",
+      409
+    );
+  }
+
+  if (Number(trail.current_trail_occupancy) >= Number(trail.daily_carrying_capacity)) {
+    return sendError(
+      res,
+      "That trail is already at full carrying capacity.",
+      409
+    );
   }
 
   const manifestId = crypto.randomUUID();
@@ -60,6 +113,33 @@ export async function createManifest(req: Request, res: Response) {
   }, 201);
 }
 
+export async function listAvailableTrails(_req: Request, res: Response) {
+  const result = await query(
+    `SELECT *
+     FROM trail
+     LEFT JOIN mountain USING (mountain_id)
+     WHERE active_safety_status = 'open'
+       AND current_trail_occupancy < daily_carrying_capacity
+     ORDER BY trail_name ASC`
+  );
+
+  return sendSuccess(res, {
+    availableTrails: result.rows,
+    count: result.rows.length,
+  });
+}
+
+export async function listMountains(_req: Request, res: Response) {
+  const result = await query(
+    "SELECT * FROM mountain ORDER BY mountain_name ASC"
+  );
+
+  return sendSuccess(res, {
+    mountains: result.rows,
+    count: result.rows.length,
+  });
+}
+
 export async function joinManifest(req: Request, res: Response) {
   const parsed = joinSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -82,10 +162,20 @@ export async function joinManifest(req: Request, res: Response) {
   }
 
   const result = await query(
-    `INSERT INTO manifest_hiker (manifest_id, hiker_user_id, status)
-     VALUES ($1, $2, 'pending')
+    `INSERT INTO manifest_hiker (
+      manifest_item_id,
+      manifest_id,
+      hiker_id,
+      joined_at,
+      hiker_readiness_status
+    ) VALUES ($1, $2, $3, NOW(), $4)
      RETURNING *`,
-    [manifest.id, authReq.auth.userId]
+    [
+      crypto.randomUUID(),
+      manifest.id,
+      authReq.auth.userId,
+      "incomplete",
+    ]
   );
 
   return sendSuccess(res, {
