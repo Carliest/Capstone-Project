@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { pingDatabase } from "./db";
+import { searchPlace } from "./mapbox";
 import { connectRedis } from "./redis";
 import { getCurrentWeather } from "./weather";
 
@@ -58,6 +59,33 @@ app.get("/api/weather/current", async (req, res) => {
     res.json({
       status: "ok",
       weather,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.get("/api/mapbox/health", async (req, res) => {
+  try {
+    const query = typeof req.query.q === "string" && req.query.q.trim()
+      ? req.query.q.trim()
+      : "Perth";
+
+    const result = await searchPlace(query);
+
+    if (!result) {
+      return res.status(503).json({
+        status: "error",
+        message: "MAPBOX_ACCESS_TOKEN is not configured",
+      });
+    }
+
+    res.json({
+      status: "ok",
+      mapbox: result,
     });
   } catch (error) {
     res.status(500).json({
