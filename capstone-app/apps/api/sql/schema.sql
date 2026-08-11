@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS lgu_access_request (
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS lgu_required_document (
+  document_type_id UUID PRIMARY KEY,
+  lgu_official_id UUID NOT NULL REFERENCES lgu_profile(lgu_official_id),
+  document_name VARCHAR NOT NULL,
+  description TEXT,
+  is_required BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE expedition_manifest
   ALTER COLUMN guide_id DROP NOT NULL;
 
