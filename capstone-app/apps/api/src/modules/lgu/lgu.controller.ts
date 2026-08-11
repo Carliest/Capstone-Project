@@ -173,7 +173,7 @@ export async function listGuides(req: Request, res: Response) {
   const result = await query(
     `SELECT g.guide_id, g.lgu_official_id, g.email, g.first_name, g.last_name,
             g.license_number, g.contact_number, g.availability_status, g.created_at
-     FROM guide g
+     FROM accredited_guide g
      WHERE g.lgu_official_id = $1
      ORDER BY g.last_name ASC, g.first_name ASC`
     , [authReq.auth.userId]
@@ -237,7 +237,7 @@ export async function createGuide(req: Request, res: Response) {
     );
 
     const guideResult = await client.query(
-      `INSERT INTO guide (
+      `INSERT INTO accredited_guide (
         guide_id,
         lgu_official_id,
         first_name,
@@ -323,7 +323,7 @@ export async function deleteGuide(req: Request, res: Response) {
     await client.query("BEGIN");
 
     const result = await client.query(
-      `DELETE FROM guide
+    `DELETE FROM accredited_guide
        WHERE guide_id = $1 AND lgu_official_id = $2
        RETURNING guide_id, first_name, last_name`,
       [guideId, authReq.auth.userId]
@@ -366,7 +366,7 @@ export async function approveManifest(req: Request, res: Response) {
 
   const guideResult = await query<{ guide_id: string }>(
     `SELECT guide_id
-     FROM guide
+     FROM accredited_guide
      WHERE guide_id = $1
        AND lgu_official_id = $2
        AND availability_status = 'available'
