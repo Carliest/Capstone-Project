@@ -1,4 +1,12 @@
 declare module "pg" {
+  export interface PoolClient {
+    query<T = any>(
+      text: string,
+      params?: any[]
+    ): Promise<{ rows: T[] }>;
+    release(): void;
+  }
+
   export class Pool {
     constructor(config?: {
       connectionString?: string;
@@ -6,6 +14,7 @@ declare module "pg" {
     });
     on(event: "connect", listener: () => void): void;
     on(event: "error", listener: (error: Error) => void): void;
+    connect(): Promise<PoolClient>;
     query<T = any>(
       text: string,
       params?: any[]

@@ -10,6 +10,7 @@ import complianceRoutes from "./modules/compliance/compliance.routes";
 import permitRoutes from "./modules/permits/permit.routes";
 import trackingRoutes from "./modules/tracking/tracking.routes";
 import announcementRoutes from "./modules/announcements/announcement.routes";
+import adminRoutes from "./modules/admin/admin.routes";
 import lguRoutes from "./modules/lgu/lgu.routes";
 import { errorMiddleware } from "./middlewares/error.middleware";
 
@@ -103,6 +104,7 @@ app.get("/api/mapbox/health", async (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/lgu", lguRoutes);
 app.use("/api/manifests", manifestRoutes);
 app.use("/api/compliance", complianceRoutes);

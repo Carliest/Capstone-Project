@@ -11,7 +11,7 @@ import type { UserRole } from "../../types/user";
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  role: z.enum(["hiker", "organizer", "lgu_official"]),
+  role: z.enum(["hiker", "organizer"]),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   address: z.string().min(1),
@@ -23,13 +23,6 @@ const registerSchema = z.object({
       climbingHistory: z.string().optional(),
       contactNumber: z.string().min(1).optional(),
       organizerName: z.string().min(1).optional(),
-      lguName: z.string().min(1).optional(),
-      province: z.string().min(1).optional(),
-      municipalityCity: z.string().min(1).optional(),
-      officeName: z.string().min(1).optional(),
-      contactPerson: z.string().min(1).optional(),
-      officeAddress: z.string().min(1).optional(),
-      isActive: z.boolean().optional(),
     })
     .optional(),
 });
@@ -123,34 +116,6 @@ export async function register(req: Request, res: Response) {
         user.user_id,
         profile.contactNumber ?? null,
         profile.organizerName ?? `${firstName} ${lastName}`,
-      ]
-    );
-  }
-
-  if (role === "lgu_official") {
-    await query(
-      `INSERT INTO lgu_profile (
-        lgu_official_id,
-        lgu_name,
-        province,
-        municipality_city,
-        office_name,
-        contact_person,
-        contact_number,
-        office_address,
-        is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (lgu_official_id) DO NOTHING`,
-      [
-        user.user_id,
-        profile.lguName ?? `${firstName} ${lastName}`,
-        profile.province ?? null,
-        profile.municipalityCity ?? null,
-        profile.officeName ?? "LGU Office",
-        profile.contactPerson ?? `${firstName} ${lastName}`,
-        profile.contactNumber ?? null,
-        profile.officeAddress ?? address,
-        profile.isActive ?? true,
       ]
     );
   }

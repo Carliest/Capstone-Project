@@ -7,7 +7,6 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 
 const createSchema = z.object({
   trailId: z.string().min(1),
-  guideId: z.string().min(1).optional(),
   climbDate: z.string().min(1),
 });
 
@@ -100,10 +99,10 @@ export async function createManifest(req: Request, res: Response) {
       manifestId,
       authReq.auth.userId,
       parsed.data.trailId,
-      parsed.data.guideId ?? null,
+      null,
       roomCode,
       parsed.data.climbDate,
-      "draft",
+      "pending_lgu_review",
     ]
   );
 

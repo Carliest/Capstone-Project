@@ -10,6 +10,7 @@ export const env = {
   redisUrl: process.env.REDIS_URL ?? "",
   jwtSecret: process.env.JWT_SECRET ?? "",
   qrHmacSecret: process.env.QR_HMAC_SECRET ?? "",
+  superAdminApiKey: process.env.SUPER_ADMIN_API_KEY ?? "",
   openWeatherApiKey: process.env.OPENWEATHER_API_KEY ?? "",
   mapboxAccessToken: process.env.MAPBOX_ACCESS_TOKEN ?? "",
 };
