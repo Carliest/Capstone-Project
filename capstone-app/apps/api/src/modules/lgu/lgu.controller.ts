@@ -25,6 +25,12 @@ const createTrailSchema = z.object({
   currentTrailOccupancy: z.number().int().nonnegative().optional(),
 });
 
+const createCheckpointStationSchema = z.object({
+  trailId: z.string().uuid(),
+  checkpointName: z.string().min(1),
+  sequenceNumber: z.number().int().positive(),
+});
+
 const createGuideSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -50,6 +56,19 @@ const lguAccessRequestSchema = z.object({
   officeAddress: z.string().min(1).optional(),
   message: z.string().min(1).optional(),
 });
+
+const buildStaticQrPayload = (data: {
+  checkpointId: string;
+  trailId: string;
+  checkpointName: string;
+  sequenceNumber: number;
+}) =>
+  JSON.stringify({
+    checkpointId: data.checkpointId,
+    trailId: data.trailId,
+    checkpointName: data.checkpointName,
+    sequenceNumber: data.sequenceNumber,
+  });
 
 const updateLguCredentialsSchema = z.object({
   email: z.string().email().optional(),
@@ -162,6 +181,72 @@ export async function createTrail(req: Request, res: Response) {
   );
 
   return sendSuccess(res, { trail: result.rows[0] }, 201);
+}
+
+export async function listCheckpointStations(_req: Request, res: Response) {
+  const result = await query(
+    `SELECT checkpoint_id, trail_id, checkpoint_name, sequence_number, static_qr_payload
+     FROM checkpoint_station
+     ORDER BY trail_id ASC, sequence_number ASC`
+  );
+
+  return sendSuccess(res, {
+    checkpointStations: result.rows,
+    count: result.rows.length,
+  });
+}
+
+export async function createCheckpointStation(req: Request, res: Response) {
+  const parsed = createCheckpointStationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(
+      res,
+      "Invalid checkpoint station payload",
+      400,
+      parsed.error.flatten()
+    );
+  }
+
+  const authReq = req as AuthenticatedRequest;
+  if (!authReq.auth) {
+    return sendError(res, "Authentication required", 401);
+  }
+
+  const trailResult = await query<{ trail_id: string }>(
+    "SELECT trail_id FROM trail WHERE trail_id = $1 LIMIT 1",
+    [parsed.data.trailId]
+  );
+  if (!trailResult.rows[0]) {
+    return sendError(res, "Trail not found", 404);
+  }
+
+  const checkpointId = crypto.randomUUID();
+  const staticQrPayload = buildStaticQrPayload({
+    checkpointId,
+    trailId: parsed.data.trailId,
+    checkpointName: parsed.data.checkpointName,
+    sequenceNumber: parsed.data.sequenceNumber,
+  });
+
+  const result = await query(
+    `INSERT INTO checkpoint_station (
+      checkpoint_id,
+      trail_id,
+      checkpoint_name,
+      sequence_number,
+      static_qr_payload
+    ) VALUES ($1, $2, $3, $4, $5)
+    RETURNING *`,
+    [
+      checkpointId,
+      parsed.data.trailId,
+      parsed.data.checkpointName,
+      parsed.data.sequenceNumber,
+      staticQrPayload,
+    ]
+  );
+
+  return sendSuccess(res, { checkpointStation: result.rows[0] }, 201);
 }
 
 export async function listGuides(req: Request, res: Response) {

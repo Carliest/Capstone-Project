@@ -3,9 +3,11 @@ import { authenticateToken, requireRole } from "../../middlewares/auth.middlewar
 import {
   approveManifest,
   createGuide,
+  createCheckpointStation,
   createMountain,
   createTrail,
   deleteGuide,
+  listCheckpointStations,
   listGuides,
   listMountains,
   listTrails,
@@ -20,6 +22,8 @@ router.get("/mountains", authenticateToken, requireRole(["lgu_official"]), listM
 router.post("/mountains", authenticateToken, requireRole(["lgu_official"]), createMountain);
 router.get("/trails", authenticateToken, requireRole(["lgu_official"]), listTrails);
 router.post("/trails", authenticateToken, requireRole(["lgu_official"]), createTrail);
+router.get("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), listCheckpointStations);
+router.post("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), createCheckpointStation);
 router.get("/guides", authenticateToken, requireRole(["lgu_official"]), listGuides);
 router.post("/guides", authenticateToken, requireRole(["lgu_official"]), createGuide);
 router.delete("/guides/:guideId", authenticateToken, requireRole(["lgu_official"]), deleteGuide);

@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS lgu_required_document (
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS checkpoint_station (
+  checkpoint_id UUID PRIMARY KEY,
+  trail_id UUID NOT NULL REFERENCES trail(trail_id),
+  checkpoint_name VARCHAR NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  static_qr_payload TEXT NOT NULL,
+  created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+  UNIQUE (trail_id, sequence_number),
+  UNIQUE (static_qr_payload)
+);
+
 ALTER TABLE expedition_manifest
   ALTER COLUMN guide_id DROP NOT NULL;
 

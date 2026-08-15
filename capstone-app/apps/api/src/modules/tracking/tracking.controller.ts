@@ -43,6 +43,44 @@ export async function logCheckpointPassage(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
+  // 1. Hiker must exist (the hiker_id comes from the JWT, not the body)
+  const hikerResult = await query<{ user_id: string }>(
+    "SELECT user_id FROM users WHERE user_id = $1 LIMIT 1",
+    [authReq.auth.userId]
+  );
+  if (!hikerResult.rows[0]) {
+    return sendError(res, "Hiker not found", 404);
+  }
+
+  // 2. Manifest must exist
+  const manifestResult = await query<{ manifest_id: string }>(
+    "SELECT manifest_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
+    [parsed.data.manifestId]
+  );
+  if (!manifestResult.rows[0]) {
+    return sendError(res, "Manifest not found", 404);
+  }
+
+  // 3. Checkpoint must exist
+  const checkpointResult = await query<{ checkpoint_id: string }>(
+    "SELECT checkpoint_id FROM checkpoint_station WHERE checkpoint_id = $1 LIMIT 1",
+    [parsed.data.checkpointId]
+  );
+  if (!checkpointResult.rows[0]) {
+    return sendError(res, "Checkpoint not found", 404);
+  }
+
+  // 4. Hiker must actually be a member of this manifest
+  const memberResult = await query<{ manifest_item_id: string }>(
+    `SELECT manifest_item_id FROM manifest_hiker
+     WHERE manifest_id = $1 AND hiker_id = $2
+     LIMIT 1`,
+    [parsed.data.manifestId, authReq.auth.userId]
+  );
+  if (!memberResult.rows[0]) {
+    return sendError(res, "Hiker is not part of this manifest", 403);
+  }
+
   const result = await query(
     `INSERT INTO checkpoint_passage_log (
       passage_log_id,
@@ -111,6 +149,35 @@ export async function createSOSAlert(req: Request, res: Response) {
   const authReq = req as AuthenticatedRequest;
   if (!authReq.auth) {
     return sendError(res, "Authentication required", 401);
+  }
+
+  // 1. Hiker must exist (the hiker_id comes from the JWT, not the body)
+  const hikerResult = await query<{ user_id: string }>(
+    "SELECT user_id FROM users WHERE user_id = $1 LIMIT 1",
+    [authReq.auth.userId]
+  );
+  if (!hikerResult.rows[0]) {
+    return sendError(res, "Hiker not found", 404);
+  }
+
+  // 2. Manifest must exist
+  const manifestResult = await query<{ manifest_id: string }>(
+    "SELECT manifest_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
+    [parsed.data.manifestId]
+  );
+  if (!manifestResult.rows[0]) {
+    return sendError(res, "Manifest not found", 404);
+  }
+
+  // 3. Hiker must actually be a member of this manifest
+  const memberResult = await query<{ manifest_item_id: string }>(
+    `SELECT manifest_item_id FROM manifest_hiker
+     WHERE manifest_id = $1 AND hiker_id = $2
+     LIMIT 1`,
+    [parsed.data.manifestId, authReq.auth.userId]
+  );
+  if (!memberResult.rows[0]) {
+    return sendError(res, "Hiker is not part of this manifest", 403);
   }
 
   const result = await query(
