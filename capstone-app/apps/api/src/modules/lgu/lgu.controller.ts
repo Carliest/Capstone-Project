@@ -75,6 +75,25 @@ const updateLguCredentialsSchema = z.object({
   password: z.string().min(8).optional(),
 });
 
+async function ensureLguAccessRequestTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS lgu_access_request (
+      request_id UUID PRIMARY KEY,
+      email VARCHAR NOT NULL,
+      lgu_name VARCHAR NOT NULL,
+      province VARCHAR,
+      municipality_city VARCHAR,
+      office_name VARCHAR,
+      contact_person VARCHAR,
+      contact_number VARCHAR,
+      office_address TEXT,
+      message TEXT,
+      status VARCHAR NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
 export async function listMountains(_req: Request, res: Response) {
   const result = await query(
     "SELECT * FROM mountain ORDER BY mountain_name ASC"
@@ -488,6 +507,8 @@ export async function submitLguAccessRequest(req: Request, res: Response) {
   if (!parsed.success) {
     return sendError(res, "Invalid LGU access request payload", 400, parsed.error.flatten());
   }
+
+  await ensureLguAccessRequestTable();
 
   const requestId = crypto.randomUUID();
   const result = await query(
