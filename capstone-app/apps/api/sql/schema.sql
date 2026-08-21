@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS checkpoint_station (
 ALTER TABLE expedition_manifest
   ALTER COLUMN guide_id DROP NOT NULL;
 
+-- The registration flow now stores a real profile photo payload.
+-- If your Render database still uses a fixed-length profile_picture column,
+-- widen it so base64 image data can fit.
+ALTER TABLE users
+  ALTER COLUMN profile_picture TYPE TEXT;
+
 -- If you still have the old accredited_guide table in Render, migrate it manually:
 -- 1. Rename or copy the data into guide
 -- 2. Update any code or views that still reference accredited_guide

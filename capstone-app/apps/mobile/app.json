@@ -7,7 +7,13 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow EcoTrail Bicol to access your photos so you can add a profile picture."
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true

@@ -14,4 +14,3 @@ export async function writeStoredValue(key: string, value: string) {
 export async function deleteStoredValue(key: string) {
   await SecureStore.deleteItemAsync(key);
 }
-

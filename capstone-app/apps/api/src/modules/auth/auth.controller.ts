@@ -15,7 +15,16 @@ const registerSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   address: z.string().min(1),
-  profilePicture: z.string().url().optional(),
+  profilePicture: z
+    .string()
+    .min(1)
+    .refine(
+      (value) =>
+        /^https?:\/\//i.test(value) ||
+        /^data:image\/[a-z0-9.+-]+;base64,/i.test(value),
+      "Profile picture must be an image URL or base64 data URI"
+    )
+    .optional(),
   profile: z
     .object({
       emergencyContactName: z.string().min(1).optional(),
