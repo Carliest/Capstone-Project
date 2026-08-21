@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { SafeAreaView, StatusBar, StyleSheet, View } from "react-native";
+import { GroupsPage } from "./src/screens/GroupsPage";
 import { LoginPage } from "./src/screens/LoginPage";
 import { HikerRegistrationScreen } from "./src/screens/HikerRegistration";
 import { LandingPage } from "./src/screens/LandingPage";
 
-type ScreenKey = "landing" | "login" | "hikerRegistration";
+type ScreenKey = "landing" | "login" | "groups" | "hikerRegistration";
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenKey>("landing");
@@ -28,7 +29,14 @@ export default function App() {
             onSignUp={() => setScreen("hikerRegistration")}
             onCompleted={(summary) => {
               setLastAction(summary);
-              setScreen("landing");
+              setScreen(summary === "Logged In" ? "groups" : "landing");
+            }}
+          />
+        ) : screen === "groups" ? (
+          <GroupsPage
+            onLogout={() => {
+              setLastAction("Logged out");
+              setScreen("login");
             }}
           />
         ) : (
