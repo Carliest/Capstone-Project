@@ -81,6 +81,7 @@ export type ManifestPerson = {
   manifest_role: "organizer" | "guide" | "hiker";
   display_name: string;
   email: string | null;
+  profile_picture: string | null;
   joined_at: string | null;
   hiker_readiness_status: string | null;
 };

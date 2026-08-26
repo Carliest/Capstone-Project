@@ -464,6 +464,7 @@ export async function listManifestPeople(req: Request, res: Response) {
     person_id: string;
     display_name: string;
     email: string | null;
+    profile_picture: string | null;
   }>(
     `SELECT
        m.organizer_id::text AS person_id,
@@ -471,7 +472,8 @@ export async function listManifestPeople(req: Request, res: Response) {
          NULLIF(TRIM(COALESCE(organizer.first_name, '') || ' ' || COALESCE(organizer.last_name, '')), ''),
          m.organizer_id::text
        ) AS display_name,
-       organizer.email
+       organizer.email,
+       organizer.profile_picture
      FROM expedition_manifest m
      LEFT JOIN users organizer ON organizer.user_id = m.organizer_id
      WHERE m.manifest_id = $1
@@ -480,10 +482,11 @@ export async function listManifestPeople(req: Request, res: Response) {
   );
 
   const guideResult = manifestRow.guide_id
-    ? await query<{
+      ? await query<{
         person_id: string;
         display_name: string;
         email: string | null;
+        profile_picture: string | null;
       }>(
         `SELECT
            m.guide_id::text AS person_id,
@@ -491,20 +494,22 @@ export async function listManifestPeople(req: Request, res: Response) {
              NULLIF(TRIM(COALESCE(guide.first_name, '') || ' ' || COALESCE(guide.last_name, '')), ''),
              m.guide_id::text
            ) AS display_name,
-           guide.email
+           guide.email,
+           guide.profile_picture
          FROM expedition_manifest m
-         LEFT JOIN accredited_guide guide ON guide.guide_id = m.guide_id
+         LEFT JOIN users guide ON guide.user_id = m.guide_id
          WHERE m.manifest_id = $1
            AND m.guide_id IS NOT NULL
          LIMIT 1`,
         [parsed.data.manifestId]
       )
-    : { rows: [] as Array<{ person_id: string; display_name: string; email: string | null }> };
+    : { rows: [] as Array<{ person_id: string; display_name: string; email: string | null; profile_picture: string | null }> };
 
   const hikers = await query<{
     person_id: string;
     display_name: string;
     email: string | null;
+    profile_picture: string | null;
     joined_at: string | null;
     hiker_readiness_status: string | null;
   }>(
@@ -515,6 +520,7 @@ export async function listManifestPeople(req: Request, res: Response) {
          mh.hiker_id::text
        ) AS display_name,
        hiker.email,
+       hiker.profile_picture,
        mh.joined_at,
        mh.hiker_readiness_status
      FROM manifest_hiker mh
@@ -530,6 +536,7 @@ export async function listManifestPeople(req: Request, res: Response) {
       manifest_role: "organizer" as const,
       joined_at: null,
       hiker_readiness_status: null,
+      profile_picture: organizerResult.rows[0].profile_picture,
       sort_order: 0,
     },
     ...(guideResult.rows[0]
@@ -546,6 +553,7 @@ export async function listManifestPeople(req: Request, res: Response) {
       manifest_role: "hiker" as const,
       display_name: row.display_name,
       email: row.email,
+      profile_picture: row.profile_picture,
       joined_at: row.joined_at,
       hiker_readiness_status: row.hiker_readiness_status,
       sort_order: 2,

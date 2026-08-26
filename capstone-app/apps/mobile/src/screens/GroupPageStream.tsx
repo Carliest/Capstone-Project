@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { BadgeCheck, ChevronRight, FileText, MapPin, Mountain, Users } from "lucide-react-native";
 import { createApiClient } from "../api";
 import { EventHeroSection } from "../components/EventHeroSection";
@@ -467,48 +467,89 @@ function PeopleTab({
   manifest: JoinedGroup | null;
   people: ManifestPerson[];
 }) {
-  const fallbackPeople =
-    people.length > 0 || !manifest?.organizer_name
-      ? people
-      : [
-          {
-            person_id: manifest.manifest_id,
-            manifest_role: "organizer" as const,
-            display_name: manifest.organizer_name,
-            email: null,
-            joined_at: null,
-            hiker_readiness_status: null,
-          },
-        ];
+  const organizerAndGuide = people.filter(
+    (person) => person.manifest_role === "organizer" || person.manifest_role === "guide"
+  );
+  const hikers = people.filter((person) => person.manifest_role === "hiker");
 
   return (
     <View style={styles.tabStack}>
       <SectionHeader title="Manifest room" subtitle="Organizer, guide, and hikers assigned to this expedition." />
-      <Text style={styles.debugText}>
-        Debug: apiPeople={people.length} · manifestJoined={manifest?.joined_count ?? 0}
-      </Text>
 
-      {fallbackPeople.length > 0 ? (
-        <View style={styles.stackGap}>
-          {fallbackPeople.map((person) => (
-            <ManifestListCard
-              key={person.person_id}
-              icon={person.manifest_role === "hiker" ? <BadgeCheck size={16} color="#2f6f32" strokeWidth={2.2} /> : <Users size={16} color="#2f6f32" strokeWidth={2.2} />}
-              accent="#2f6f32"
-              title={person.display_name}
-              subtitle={person.manifest_role.toUpperCase()}
-              body={
-                person.manifest_role === "hiker"
-                  ? `Joined ${formatDateTime(person.joined_at)} - ${person.hiker_readiness_status ?? "pending"}`
-                  : person.email ?? "Assigned to this manifest"
-              }
-              badge={person.manifest_role}
-            />
-          ))}
-        </View>
-      ) : (
+      {organizerAndGuide.length > 0 ? (
+        <PeopleSection title="Organizer & Guide" people={organizerAndGuide} />
+      ) : manifest?.organizer_name ? (
+        <PeopleSection
+          title="Organizer & Guide"
+          people={[
+            {
+              person_id: manifest.manifest_id,
+              manifest_role: "organizer",
+              display_name: manifest.organizer_name,
+              email: null,
+              profile_picture: null,
+              joined_at: null,
+              hiker_readiness_status: null,
+            },
+          ]}
+        />
+      ) : null}
+
+      {hikers.length > 0 ? <PeopleSection title={`Hikers (${hikers.length})`} people={hikers} /> : null}
+
+      {organizerAndGuide.length === 0 && hikers.length === 0 ? (
         <EmptyState title="No people found" body="This room is still waiting for assignments." />
-      )}
+      ) : null}
+    </View>
+  );
+}
+
+function PeopleSection({ title, people }: { title: string; people: ManifestPerson[] }) {
+  return (
+    <View style={styles.peopleSection}>
+      <Text style={styles.peopleSectionTitle}>{title}</Text>
+      <View style={styles.stackGap}>
+        {people.map((person) => (
+          <PersonCard key={person.person_id} person={person} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function PersonCard({ person }: { person: ManifestPerson }) {
+  const initials = getInitials(person.display_name);
+  const roleLabel =
+    person.manifest_role === "organizer"
+      ? "Organizer"
+      : person.manifest_role === "guide"
+        ? "Guide"
+        : "Hiker";
+
+  return (
+    <View style={styles.personCard}>
+      <View
+        style={[
+          styles.personAvatar,
+          { backgroundColor: person.manifest_role === "hiker" ? "#ebe8df" : "#e8f3e6" },
+        ]}
+      >
+        {person.profile_picture ? (
+          <Image source={{ uri: person.profile_picture }} style={styles.personAvatarImage} resizeMode="cover" />
+        ) : (
+          <Text style={styles.personAvatarText}>{initials}</Text>
+        )}
+      </View>
+
+      <View style={styles.personCopy}>
+        <Text style={styles.personName}>{person.display_name}</Text>
+        <Text style={styles.personRole}>{roleLabel}</Text>
+        {person.manifest_role === "hiker" ? (
+          <Text style={styles.personMeta}>
+            Joined {formatDateTime(person.joined_at)} · {person.hiker_readiness_status ?? "pending"}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -671,6 +712,17 @@ function formatDateTime(dateValue: string | null | undefined) {
   }).format(date);
 }
 
+function getInitials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "H"
+  );
+}
+
 function fileNameFromUrl(url: string) {
   try {
     const value = new URL(url).pathname.split("/").pop();
@@ -718,8 +770,59 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  debugText: {
-    color: "#8a947f",
+  peopleSection: {
+    gap: 10,
+  },
+  peopleSectionTitle: {
+    color: "#71806d",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  personCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 20,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "rgba(44,80,40,0.08)",
+    padding: 14,
+  },
+  personAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  personAvatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  personAvatarText: {
+    color: "#6f7d68",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  personCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  personName: {
+    color: "#243524",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  personRole: {
+    color: "#7b8877",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  personMeta: {
+    color: "#93a090",
     fontSize: 11,
     lineHeight: 16,
   },
