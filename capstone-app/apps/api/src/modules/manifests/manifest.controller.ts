@@ -447,69 +447,114 @@ export async function listManifestPeople(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
-  const manifest = await query<{ manifest_id: string }>(
-    "SELECT manifest_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
+  const manifest = await query<{
+    manifest_id: string;
+    organizer_id: string;
+    guide_id: string | null;
+  }>(
+    "SELECT manifest_id, organizer_id, guide_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
     [parsed.data.manifestId]
   );
   if (!manifest.rows[0]) {
     return sendError(res, "Manifest not found", 404);
   }
 
-  const result = await query<{
+  const manifestRow = manifest.rows[0];
+  const organizerResult = await query<{
+    person_id: string;
+    display_name: string;
+    email: string | null;
+  }>(
+    `SELECT
+       m.organizer_id::text AS person_id,
+       COALESCE(
+         NULLIF(TRIM(COALESCE(organizer.first_name, '') || ' ' || COALESCE(organizer.last_name, '')), ''),
+         m.organizer_id::text
+       ) AS display_name,
+       organizer.email
+     FROM expedition_manifest m
+     LEFT JOIN users organizer ON organizer.user_id = m.organizer_id
+     WHERE m.manifest_id = $1
+     LIMIT 1`,
+    [parsed.data.manifestId]
+  );
+
+  const guideResult = manifestRow.guide_id
+    ? await query<{
+        person_id: string;
+        display_name: string;
+        email: string | null;
+      }>(
+        `SELECT
+           m.guide_id::text AS person_id,
+           COALESCE(
+             NULLIF(TRIM(COALESCE(guide.first_name, '') || ' ' || COALESCE(guide.last_name, '')), ''),
+             m.guide_id::text
+           ) AS display_name,
+           guide.email
+         FROM expedition_manifest m
+         LEFT JOIN accredited_guide guide ON guide.guide_id = m.guide_id
+         WHERE m.manifest_id = $1
+           AND m.guide_id IS NOT NULL
+         LIMIT 1`,
+        [parsed.data.manifestId]
+      )
+    : { rows: [] as Array<{ person_id: string; display_name: string; email: string | null }> };
+
+  const hikers = await query<{
     person_id: string;
     display_name: string;
     email: string | null;
     joined_at: string | null;
     hiker_readiness_status: string | null;
-    sort_order: number;
   }>(
-    `SELECT *
-     FROM (
-       SELECT
-         m.organizer_id::text AS person_id,
-         'organizer'::text AS manifest_role,
-         m.organizer_id::text AS display_name,
-         NULL::text AS email,
-         NULL::timestamp AS joined_at,
-         NULL::text AS hiker_readiness_status,
-         0 AS sort_order
-       FROM expedition_manifest m
-       WHERE m.manifest_id = $1
-
-       UNION ALL
-
-       SELECT
-         m.guide_id::text AS person_id,
-         'guide'::text AS manifest_role,
-         m.guide_id::text AS display_name,
-         NULL::text AS email,
-         NULL::timestamp AS joined_at,
-         NULL::text AS hiker_readiness_status,
-         1 AS sort_order
-       FROM expedition_manifest m
-       WHERE m.manifest_id = $1
-         AND m.guide_id IS NOT NULL
-
-       UNION ALL
-
-       SELECT
-         mh.hiker_id::text AS person_id,
-         'hiker'::text AS manifest_role,
-         mh.hiker_id::text AS display_name,
-         NULL::text AS email,
-         mh.joined_at,
-         mh.hiker_readiness_status,
-         2 AS sort_order
-       FROM manifest_hiker mh
-       WHERE mh.manifest_id = $1
-     ) people
-     ORDER BY people.sort_order ASC, people.joined_at ASC NULLS LAST, people.person_id ASC`,
+    `SELECT
+       mh.hiker_id::text AS person_id,
+       COALESCE(
+         NULLIF(TRIM(COALESCE(hiker.first_name, '') || ' ' || COALESCE(hiker.last_name, '')), ''),
+         mh.hiker_id::text
+       ) AS display_name,
+       hiker.email,
+       mh.joined_at,
+       mh.hiker_readiness_status
+     FROM manifest_hiker mh
+     LEFT JOIN users hiker ON hiker.user_id = mh.hiker_id
+     WHERE mh.manifest_id = $1
+     ORDER BY mh.joined_at ASC NULLS LAST, mh.hiker_id ASC`,
     [parsed.data.manifestId]
   );
 
+  const result = [
+    {
+      ...organizerResult.rows[0],
+      manifest_role: "organizer" as const,
+      joined_at: null,
+      hiker_readiness_status: null,
+      sort_order: 0,
+    },
+    ...(guideResult.rows[0]
+      ? [{
+          ...guideResult.rows[0],
+          manifest_role: "guide" as const,
+          joined_at: null,
+          hiker_readiness_status: null,
+          sort_order: 1,
+        }]
+      : []),
+    ...hikers.rows.map((row) => ({
+      person_id: row.person_id,
+      manifest_role: "hiker" as const,
+      display_name: row.display_name,
+      email: row.email,
+      joined_at: row.joined_at,
+      hiker_readiness_status: row.hiker_readiness_status,
+      sort_order: 2,
+    })),
+  ];
+
   return sendSuccess(res, {
-    people: result.rows,
-    count: result.rows.length,
+    people: result,
+    count: result.length,
   });
 }
 
@@ -658,7 +703,7 @@ export async function listManifestRequirements(req: Request, res: Response) {
 
   const manifestItemId = membership.rows[0]?.manifest_item_id ?? null;
 
-  const trailMaterials = await query<{
+  let trailMaterials: Array<{
     trail_material_id: string;
     manifest_id: string;
     title: string;
@@ -666,23 +711,47 @@ export async function listManifestRequirements(req: Request, res: Response) {
     resource_url: string | null;
     description: string | null;
     created_at: string;
-  }>(
-    `SELECT
-      trail_material_id,
-      manifest_id,
-      title,
-      material_type,
-      resource_url,
-      description,
-      created_at
-     FROM trail_resource_material
-     WHERE manifest_id = $1
-     ORDER BY created_at ASC, title ASC`,
-    [parsed.data.manifestId]
-  );
+  }> = [];
+  try {
+    const trailMaterialsResult = await query<{
+      trail_material_id: string;
+      manifest_id: string;
+      title: string;
+      material_type: string;
+      resource_url: string | null;
+      description: string | null;
+      created_at: string;
+    }>(
+      `SELECT
+        trail_material_id,
+        manifest_id,
+        title,
+        material_type,
+        resource_url,
+        description,
+        created_at
+       FROM trail_resource_material
+       WHERE manifest_id = $1
+       ORDER BY created_at ASC, title ASC`,
+      [parsed.data.manifestId]
+    );
 
-  const complianceDocuments = manifestItemId
-    ? await query<{
+    trailMaterials = trailMaterialsResult.rows;
+  } catch {
+    trailMaterials = [];
+  }
+
+  let complianceDocuments: Array<{
+    document_id: string;
+    document_type_id: string;
+    document_name: string;
+    uploaded_file_url: string;
+    verification_status: string;
+    created_at: string;
+  }> = [];
+  if (manifestItemId) {
+    try {
+      const complianceDocumentsResult = await query<{
         document_id: string;
         document_type_id: string;
         document_name: string;
@@ -702,22 +771,20 @@ export async function listManifestRequirements(req: Request, res: Response) {
          WHERE d.manifest_item_id = $1
          ORDER BY d.created_at DESC, t.document_name ASC`,
         [manifestItemId]
-      )
-    : { rows: [] as Array<{
-        document_id: string;
-        document_type_id: string;
-        document_name: string;
-        uploaded_file_url: string;
-        verification_status: string;
-        created_at: string;
-      }> };
+      );
+
+      complianceDocuments = complianceDocumentsResult.rows;
+    } catch {
+      complianceDocuments = [];
+    }
+  }
 
   return sendSuccess(res, {
     requirements: {
       manifestId: parsed.data.manifestId,
       manifestItemId,
-      trailMaterials: trailMaterials.rows,
-      complianceDocuments: complianceDocuments.rows,
+      trailMaterials,
+      complianceDocuments,
     },
   });
 }
@@ -741,7 +808,7 @@ export async function listManifestTrailMaterials(req: Request, res: Response) {
     return sendError(res, "Manifest not found", 404);
   }
 
-  const result = await query<{
+  let result: Array<{
     trail_material_id: string;
     manifest_id: string;
     title: string;
@@ -749,24 +816,39 @@ export async function listManifestTrailMaterials(req: Request, res: Response) {
     resource_url: string | null;
     description: string | null;
     created_at: string;
-  }>(
-    `SELECT
-      trail_material_id,
-      manifest_id,
-      title,
-      material_type,
-      resource_url,
-      description,
-      created_at
-     FROM trail_resource_material
-     WHERE manifest_id = $1
-     ORDER BY created_at ASC, title ASC`,
-    [parsed.data.manifestId]
-  );
+  }> = [];
+  try {
+    const materialResult = await query<{
+      trail_material_id: string;
+      manifest_id: string;
+      title: string;
+      material_type: string;
+      resource_url: string | null;
+      description: string | null;
+      created_at: string;
+    }>(
+      `SELECT
+        trail_material_id,
+        manifest_id,
+        title,
+        material_type,
+        resource_url,
+        description,
+        created_at
+       FROM trail_resource_material
+       WHERE manifest_id = $1
+       ORDER BY created_at ASC, title ASC`,
+      [parsed.data.manifestId]
+    );
+
+    result = materialResult.rows;
+  } catch {
+    result = [];
+  }
 
   return sendSuccess(res, {
-    trailMaterials: result.rows,
-    count: result.rows.length,
+    trailMaterials: result,
+    count: result.length,
   });
 }
 

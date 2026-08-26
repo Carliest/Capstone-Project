@@ -20,28 +20,32 @@ export async function searchPlace(query: string) {
   url.searchParams.set("access_token", accessToken);
   url.searchParams.set("limit", "1");
 
-  const response = await fetch(url);
+  try {
+    const response = await fetch(url);
 
-  if (!response.ok) {
-    throw new Error(`Mapbox request failed with ${response.status}`);
-  }
+    if (!response.ok) {
+      return null;
+    }
 
-  const data = (await response.json()) as MapboxGeocodingResponse;
-  const feature = data.features?.[0];
+    const data = (await response.json()) as MapboxGeocodingResponse;
+    const feature = data.features?.[0];
 
-  if (!feature) {
+    if (!feature) {
+      return {
+        found: false,
+        query,
+      };
+    }
+
     return {
-      found: false,
+      found: true,
       query,
+      placeName: feature.place_name ?? null,
+      coordinates: feature.center ?? null,
+      text: feature.text ?? null,
+      id: feature.id ?? null,
     };
+  } catch {
+    return null;
   }
-
-  return {
-    found: true,
-    query,
-    placeName: feature.place_name ?? null,
-    coordinates: feature.center ?? null,
-    text: feature.text ?? null,
-    id: feature.id ?? null,
-  };
 }

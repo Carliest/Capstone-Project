@@ -4,7 +4,7 @@ import { createAnnouncement, listAnnouncements } from "./announcement.controller
 
 const router = Router();
 
-router.get("/", listAnnouncements);
+router.get("/", authenticateToken, listAnnouncements);
 router.post("/", authenticateToken, createAnnouncement);
 
 export default router;
