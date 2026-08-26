@@ -4,12 +4,15 @@ import { GroupsPage } from "./src/screens/GroupsPage";
 import { LoginPage } from "./src/screens/LoginPage";
 import { HikerRegistrationScreen } from "./src/screens/HikerRegistration";
 import { LandingPage } from "./src/screens/LandingPage";
+import { GroupPageStream } from "./src/screens/GroupPageStream";
+import type { JoinedGroup } from "./src/types/manifest";
 
-type ScreenKey = "landing" | "login" | "groups" | "hikerRegistration";
+type ScreenKey = "landing" | "login" | "groups" | "hikerRegistration" | "groupStream";
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenKey>("landing");
   const [lastAction, setLastAction] = useState<string | null>(null);
+  const [selectedManifest, setSelectedManifest] = useState<JoinedGroup | null>(null);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -38,6 +41,15 @@ export default function App() {
               setLastAction("Logged out");
               setScreen("login");
             }}
+            onOpenStream={(manifest) => {
+              setSelectedManifest(manifest);
+              setScreen("groupStream");
+            }}
+          />
+        ) : screen === "groupStream" ? (
+          <GroupPageStream
+            manifest={selectedManifest}
+            onBack={() => setScreen("groups")}
           />
         ) : (
           <HikerRegistrationScreen

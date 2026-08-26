@@ -11,10 +11,45 @@ const createSchema = z.object({
   content: z.string().min(1),
 });
 
-export async function listAnnouncements(_req: Request, res: Response) {
-  const result = await query(
-    "SELECT * FROM announcement ORDER BY created_at DESC LIMIT 50"
-  );
+const listSchema = z.object({
+  manifestId: z.string().min(1).optional(),
+});
+
+export async function listAnnouncements(req: Request, res: Response) {
+  const parsed = listSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return sendError(res, "Invalid announcement filters", 400, parsed.error.flatten());
+  }
+
+  const authReq = req as AuthenticatedRequest;
+  const manifestId = parsed.data.manifestId?.trim() ?? "";
+
+  if (manifestId && !authReq.auth) {
+    return sendError(res, "Authentication required", 401);
+  }
+
+  const result = manifestId
+    ? await query(
+        `SELECT
+          a.*,
+          organizer.first_name || ' ' || organizer.last_name AS organizer_name
+         FROM announcement a
+         LEFT JOIN users organizer ON organizer.user_id = a.organizer_id
+         WHERE manifest_id = $1
+         ORDER BY a.created_at DESC
+         LIMIT 50`,
+        [manifestId]
+      )
+    : await query(
+        `SELECT
+          a.*,
+          organizer.first_name || ' ' || organizer.last_name AS organizer_name
+         FROM announcement a
+         LEFT JOIN users organizer ON organizer.user_id = a.organizer_id
+         ORDER BY a.created_at DESC
+         LIMIT 50`
+      );
+
   return sendSuccess(res, { announcements: result.rows });
 }
 

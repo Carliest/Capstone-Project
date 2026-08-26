@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS lgu_required_document (
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS trail_resource_material (
+  trail_material_id UUID PRIMARY KEY,
+  manifest_id UUID NOT NULL REFERENCES expedition_manifest(manifest_id) ON DELETE CASCADE,
+  lgu_official_id UUID NOT NULL REFERENCES lgu_profile(lgu_official_id),
+  title VARCHAR NOT NULL,
+  material_type VARCHAR NOT NULL,
+  resource_url TEXT,
+  description TEXT,
+  created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS checkpoint_station (
   checkpoint_id UUID PRIMARY KEY,
   trail_id UUID NOT NULL REFERENCES trail(trail_id),
