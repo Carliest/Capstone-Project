@@ -18,6 +18,7 @@ import type {
   ManifestComplianceDocument,
   ManifestPerson,
   ManifestRequirements,
+  ManifestRequiredDocument,
   ManifestTrail,
   ManifestTrailMaterial,
 } from "../types/manifest";
@@ -65,6 +66,7 @@ const MANIFEST_CACHE_PREFIX = "offline-cache:manifest:";
 type ManifestSnapshot = {
   announcements: AnnouncementsResponse["announcements"];
   trailMaterials: ManifestTrailMaterial[];
+  requiredDocuments: ManifestRequiredDocument[];
   complianceDocuments: ManifestComplianceDocument[];
   trail: ManifestTrail | null;
   trailGps: ManifestTrail["gps"];
@@ -76,6 +78,7 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [announcements, setAnnouncements] = useState<AnnouncementsResponse["announcements"]>([]);
   const [trailMaterials, setTrailMaterials] = useState<ManifestTrailMaterial[]>([]);
+  const [requiredDocuments, setRequiredDocuments] = useState<ManifestRequiredDocument[]>([]);
   const [complianceDocuments, setComplianceDocuments] = useState<ManifestComplianceDocument[]>([]);
   const [trail, setTrail] = useState<ManifestTrail | null>(null);
   const [trailGps, setTrailGps] = useState<ManifestTrail["gps"]>(null);
@@ -91,12 +94,10 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
   const isSyncing = activeSyncOperations > 0;
 
   const pendingCount = useMemo(() => {
-    const compliancePending = complianceDocuments.filter(
-      (document) => document.verification_status !== "verified"
-    ).length;
-
-    return trailMaterials.length + compliancePending;
-  }, [trailMaterials, complianceDocuments]);
+    const requiredCount = requiredDocuments.filter((document) => document.is_required).length;
+    const uploadedCount = complianceDocuments.length;
+    return Math.max(requiredCount - uploadedCount, 0);
+  }, [requiredDocuments, complianceDocuments]);
 
   useEffect(() => {
     setActiveTab("Stream");
@@ -161,6 +162,7 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
       const snapshot: ManifestSnapshot = {
         announcements: [],
         trailMaterials: [],
+        requiredDocuments: [],
         complianceDocuments: [],
         trail: null,
         trailGps: null,
@@ -183,6 +185,7 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
 
       const requirementsResult = results[2];
       if (requirementsResult.status === "fulfilled") {
+        snapshot.requiredDocuments = requirementsResult.value.requirements.requiredDocuments ?? [];
         snapshot.complianceDocuments = requirementsResult.value.requirements.complianceDocuments;
         if (trailMaterialsResult.status !== "fulfilled") {
           snapshot.trailMaterials = requirementsResult.value.requirements.trailMaterials;
@@ -208,6 +211,7 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
 
       setAnnouncements(snapshot.announcements);
       setTrailMaterials(snapshot.trailMaterials);
+      setRequiredDocuments(snapshot.requiredDocuments);
       setComplianceDocuments(snapshot.complianceDocuments);
       setTrail(snapshot.trail);
       setTrailGps(snapshot.trailGps);
@@ -259,6 +263,7 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
 
     setAnnouncements(cached.announcements ?? []);
     setTrailMaterials(cached.trailMaterials ?? []);
+    setRequiredDocuments(cached.requiredDocuments ?? []);
     setComplianceDocuments(cached.complianceDocuments ?? []);
     setTrail(cached.trail ?? null);
     setTrailGps(cached.trailGps ?? null);

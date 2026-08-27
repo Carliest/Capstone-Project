@@ -9,8 +9,8 @@ import {
 
 const router = Router();
 
-router.get("/document-types", authenticateToken, requireRole(["lgu_official"]), listDocumentTypes);
-router.post("/document-types", authenticateToken, requireRole(["lgu_official"]), createDocumentType);
+router.get("/document-types", authenticateToken, requireRole(["organizer"]), listDocumentTypes);
+router.post("/document-types", authenticateToken, requireRole(["organizer"]), createDocumentType);
 router.post(
   "/upload",
   authenticateToken,

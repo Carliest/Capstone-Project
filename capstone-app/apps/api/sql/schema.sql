@@ -42,9 +42,20 @@ CREATE TABLE IF NOT EXISTS lgu_required_document (
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS manifest_required_document (
+  document_type_id UUID PRIMARY KEY,
+  manifest_id UUID NOT NULL REFERENCES expedition_manifest(manifest_id) ON DELETE CASCADE,
+  created_by_organizer_id UUID NOT NULL REFERENCES users(user_id),
+  document_name VARCHAR NOT NULL,
+  description TEXT,
+  is_required BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS trail_resource_material (
   trail_material_id UUID PRIMARY KEY,
-  manifest_id UUID NOT NULL REFERENCES expedition_manifest(manifest_id) ON DELETE CASCADE,
+  trail_id UUID REFERENCES trail(trail_id) ON DELETE CASCADE,
+  manifest_id UUID REFERENCES expedition_manifest(manifest_id) ON DELETE CASCADE,
   lgu_official_id UUID NOT NULL REFERENCES lgu_profile(lgu_official_id),
   title VARCHAR NOT NULL,
   material_type VARCHAR NOT NULL,
@@ -52,6 +63,12 @@ CREATE TABLE IF NOT EXISTS trail_resource_material (
   description TEXT,
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE trail_resource_material
+  ADD COLUMN IF NOT EXISTS trail_id UUID REFERENCES trail(trail_id) ON DELETE CASCADE;
+
+ALTER TABLE trail_resource_material
+  ALTER COLUMN manifest_id DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS checkpoint_station (
   checkpoint_id UUID PRIMARY KEY,

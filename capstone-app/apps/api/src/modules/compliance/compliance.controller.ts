@@ -5,6 +5,10 @@ import { query } from "../../config/database";
 import { sendError, sendSuccess } from "../../utils/response";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 
+const listSchema = z.object({
+  manifestId: z.string().min(1),
+});
+
 const uploadSchema = z.object({
   manifestItemId: z.string().min(1),
   documentTypeId: z.string().min(1),
@@ -17,17 +21,64 @@ const verifySchema = z.object({
 });
 
 const createDocumentTypeSchema = z.object({
+  manifestId: z.string().min(1),
   documentName: z.string().min(1),
   description: z.string().min(1).optional(),
   isRequired: z.boolean().optional(),
 });
 
-export async function listDocumentTypes(_req: Request, res: Response) {
+async function assertManifestOwner(manifestId: string, userId: string) {
+  const result = await query<{
+    manifest_id: string;
+    organizer_id: string;
+  }>(
+    `SELECT manifest_id, organizer_id
+     FROM expedition_manifest
+     WHERE manifest_id = $1
+     LIMIT 1`,
+    [manifestId]
+  );
+
+  const manifest = result.rows[0];
+  if (!manifest) {
+    return { ok: false as const, status: 404, message: "Manifest not found" };
+  }
+
+  if (manifest.organizer_id !== userId) {
+    return {
+      ok: false as const,
+      status: 403,
+      message: "Only the room creator can manage compliance templates",
+    };
+  }
+
+  return { ok: true as const };
+}
+
+export async function listDocumentTypes(req: Request, res: Response) {
+  const parsed = listSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return sendError(res, "Manifest ID is required", 400, parsed.error.flatten());
+  }
+
+  const authReq = req as AuthenticatedRequest;
+  if (!authReq.auth) {
+    return sendError(res, "Authentication required", 401);
+  }
+
+  const ownershipCheck = await assertManifestOwner(parsed.data.manifestId, authReq.auth.userId);
+  if (!ownershipCheck.ok) {
+    return sendError(res, ownershipCheck.message, ownershipCheck.status);
+  }
+
   const result = await query(
-    `SELECT document_type_id, lgu_official_id, document_name, description,
+    `SELECT document_type_id, manifest_id, created_by_organizer_id, document_name, description,
             is_required, created_at
-     FROM lgu_required_document
+     FROM manifest_required_document
+     WHERE manifest_id = $1
      ORDER BY document_name ASC`
+    ,
+    [parsed.data.manifestId]
   );
 
   return sendSuccess(res, {
@@ -47,19 +98,33 @@ export async function createDocumentType(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
+  if (authReq.auth.role !== "organizer") {
+    return sendError(res, "Only organizers can create compliance templates", 403);
+  }
+
+  const ownershipCheck = await assertManifestOwner(
+    parsed.data.manifestId,
+    authReq.auth.userId
+  );
+  if (!ownershipCheck.ok) {
+    return sendError(res, ownershipCheck.message, ownershipCheck.status);
+  }
+
   const documentTypeId = crypto.randomUUID();
   const result = await query(
-    `INSERT INTO lgu_required_document (
+    `INSERT INTO manifest_required_document (
       document_type_id,
-      lgu_official_id,
+      manifest_id,
+      created_by_organizer_id,
       document_name,
       description,
       is_required
-    ) VALUES ($1, $2, $3, $4, $5)
-    RETURNING document_type_id, lgu_official_id, document_name, description,
+    ) VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING document_type_id, manifest_id, created_by_organizer_id, document_name, description,
               is_required, created_at`,
     [
       documentTypeId,
+      parsed.data.manifestId,
       authReq.auth.userId,
       parsed.data.documentName,
       parsed.data.description ?? null,
@@ -81,12 +146,31 @@ export async function uploadComplianceDocument(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
+  const membership = await query<{
+    manifest_item_id: string;
+    manifest_id: string;
+  }>(
+    `SELECT mh.manifest_item_id, mh.manifest_id
+     FROM manifest_hiker mh
+     WHERE mh.manifest_item_id = $1
+       AND mh.hiker_id = $2
+     LIMIT 1`,
+    [parsed.data.manifestItemId, authReq.auth.userId]
+  );
+  if (!membership.rows[0]) {
+    return sendError(res, "Manifest membership not found", 403);
+  }
+
   const documentType = await query<{ document_type_id: string }>(
-    "SELECT document_type_id FROM lgu_required_document WHERE document_type_id = $1 LIMIT 1",
-    [parsed.data.documentTypeId]
+    `SELECT document_type_id
+     FROM manifest_required_document
+     WHERE document_type_id = $1
+       AND manifest_id = $2
+     LIMIT 1`,
+    [parsed.data.documentTypeId, membership.rows[0].manifest_id]
   );
   if (!documentType.rows[0]) {
-    return sendError(res, "Document type not found", 404);
+    return sendError(res, "Document type not found for this manifest", 404);
   }
 
   const result = await query(

@@ -23,13 +23,19 @@ const manifestParamsSchema = z.object({
   manifestId: z.string().min(1),
 });
 
-const createTrailMaterialSchema = z.object({
-  manifestId: z.string().min(1),
-  title: z.string().min(1),
-  materialType: z.enum(["video", "pdf", "file", "link"]),
-  resourceUrl: z.string().url().optional(),
-  description: z.string().min(1).optional(),
-});
+const createTrailMaterialSchema = z
+  .object({
+    trailId: z.string().min(1).optional(),
+    manifestId: z.string().min(1).optional(),
+    title: z.string().min(1),
+    materialType: z.enum(["video", "pdf", "file", "link"]),
+    resourceUrl: z.string().url().optional(),
+    description: z.string().min(1).optional(),
+  })
+  .refine((value) => Boolean(value.trailId || value.manifestId), {
+    message: "Trail ID or manifest ID is required",
+    path: ["trailId"],
+  });
 
 function generateRoomCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -65,6 +71,62 @@ async function findBookableTrailById(trailId: string) {
   );
 
   return result.rows[0] ?? null;
+}
+
+async function resolveManifestTrailId(manifestId: string) {
+  const result = await query<{ trail_id: string | null }>(
+    "SELECT trail_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
+    [manifestId]
+  );
+
+  return result.rows[0]?.trail_id ?? null;
+}
+
+async function getTrailMaterialsForManifest(manifestId: string) {
+  const trailId = await resolveManifestTrailId(manifestId);
+  if (!trailId) {
+    return [] as Array<{
+      trail_material_id: string;
+      trail_id: string | null;
+      manifest_id: string | null;
+      lgu_official_id: string;
+      title: string;
+      material_type: string;
+      resource_url: string | null;
+      description: string | null;
+      created_at: string;
+    }>;
+  }
+
+  const result = await query<{
+    trail_material_id: string;
+    trail_id: string | null;
+    manifest_id: string | null;
+    lgu_official_id: string;
+    title: string;
+    material_type: string;
+    resource_url: string | null;
+    description: string | null;
+    created_at: string;
+  }>(
+    `SELECT
+      trail_material_id,
+      trail_id,
+      manifest_id,
+      lgu_official_id,
+      title,
+      material_type,
+      resource_url,
+      description,
+      created_at
+     FROM trail_resource_material
+     WHERE trail_id = $1
+        OR manifest_id = $2
+     ORDER BY created_at ASC, title ASC`,
+    [trailId, manifestId]
+  );
+
+  return result.rows;
 }
 
 export async function createManifest(req: Request, res: Response) {
@@ -710,43 +772,45 @@ export async function listManifestRequirements(req: Request, res: Response) {
   );
 
   const manifestItemId = membership.rows[0]?.manifest_item_id ?? null;
+  const trailMaterials = await getTrailMaterialsForManifest(parsed.data.manifestId);
 
-  let trailMaterials: Array<{
-    trail_material_id: string;
+  let requiredDocuments: Array<{
+    document_type_id: string;
     manifest_id: string;
-    title: string;
-    material_type: string;
-    resource_url: string | null;
+    created_by_organizer_id: string;
+    document_name: string;
     description: string | null;
+    is_required: boolean;
     created_at: string;
   }> = [];
+
   try {
-    const trailMaterialsResult = await query<{
-      trail_material_id: string;
+    const requiredDocumentsResult = await query<{
+      document_type_id: string;
       manifest_id: string;
-      title: string;
-      material_type: string;
-      resource_url: string | null;
+      created_by_organizer_id: string;
+      document_name: string;
       description: string | null;
+      is_required: boolean;
       created_at: string;
     }>(
       `SELECT
-        trail_material_id,
+        document_type_id,
         manifest_id,
-        title,
-        material_type,
-        resource_url,
+        created_by_organizer_id,
+        document_name,
         description,
+        is_required,
         created_at
-       FROM trail_resource_material
+       FROM manifest_required_document
        WHERE manifest_id = $1
-       ORDER BY created_at ASC, title ASC`,
+       ORDER BY created_at ASC, document_name ASC`,
       [parsed.data.manifestId]
     );
 
-    trailMaterials = trailMaterialsResult.rows;
+    requiredDocuments = requiredDocumentsResult.rows;
   } catch {
-    trailMaterials = [];
+    requiredDocuments = [];
   }
 
   let complianceDocuments: Array<{
@@ -775,7 +839,7 @@ export async function listManifestRequirements(req: Request, res: Response) {
           d.verification_status,
           d.created_at
          FROM hiker_compliance_document d
-         INNER JOIN lgu_required_document t ON t.document_type_id = d.document_type_id
+         INNER JOIN manifest_required_document t ON t.document_type_id = d.document_type_id
          WHERE d.manifest_item_id = $1
          ORDER BY d.created_at DESC, t.document_name ASC`,
         [manifestItemId]
@@ -792,6 +856,7 @@ export async function listManifestRequirements(req: Request, res: Response) {
       manifestId: parsed.data.manifestId,
       manifestItemId,
       trailMaterials,
+      requiredDocuments,
       complianceDocuments,
     },
   });
@@ -816,43 +881,7 @@ export async function listManifestTrailMaterials(req: Request, res: Response) {
     return sendError(res, "Manifest not found", 404);
   }
 
-  let result: Array<{
-    trail_material_id: string;
-    manifest_id: string;
-    title: string;
-    material_type: string;
-    resource_url: string | null;
-    description: string | null;
-    created_at: string;
-  }> = [];
-  try {
-    const materialResult = await query<{
-      trail_material_id: string;
-      manifest_id: string;
-      title: string;
-      material_type: string;
-      resource_url: string | null;
-      description: string | null;
-      created_at: string;
-    }>(
-      `SELECT
-        trail_material_id,
-        manifest_id,
-        title,
-        material_type,
-        resource_url,
-        description,
-        created_at
-       FROM trail_resource_material
-       WHERE manifest_id = $1
-       ORDER BY created_at ASC, title ASC`,
-      [parsed.data.manifestId]
-    );
-
-    result = materialResult.rows;
-  } catch {
-    result = [];
-  }
+  const result = await getTrailMaterialsForManifest(parsed.data.manifestId);
 
   return sendSuccess(res, {
     trailMaterials: result,
@@ -871,29 +900,34 @@ export async function createManifestTrailMaterial(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
-  const manifest = await query<{ manifest_id: string }>(
-    "SELECT manifest_id FROM expedition_manifest WHERE manifest_id = $1 LIMIT 1",
-    [parsed.data.manifestId]
-  );
-  if (!manifest.rows[0]) {
-    return sendError(res, "Manifest not found", 404);
+  let trailId = parsed.data.trailId?.trim() ?? "";
+  const manifestId = parsed.data.manifestId?.trim() ?? "";
+
+  if (!trailId && manifestId) {
+    trailId = (await resolveManifestTrailId(manifestId)) ?? "";
+  }
+
+  if (!trailId) {
+    return sendError(res, "Trail not found", 404);
   }
 
   const materialId = crypto.randomUUID();
   const result = await query(
     `INSERT INTO trail_resource_material (
       trail_material_id,
+      trail_id,
       manifest_id,
       lgu_official_id,
       title,
       material_type,
       resource_url,
       description
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *`,
     [
       materialId,
-      parsed.data.manifestId,
+      trailId,
+      manifestId || null,
       authReq.auth.userId,
       parsed.data.title,
       parsed.data.materialType,

@@ -20,7 +20,7 @@ import {
 type LoginPageProps = {
   onBack: () => void;
   onSignUp: () => void;
-  onCompleted: (summary: string) => void;
+  onCompleted: (result: LoginResponse) => void;
 };
 
 type LoginResponse = {
@@ -81,7 +81,7 @@ export function LoginPage({
         })
       );
 
-      onCompleted("Logged In");
+      onCompleted(result);
       Alert.alert("Welcome back", "You are now signed in.");
     } catch (error) {
       const message =

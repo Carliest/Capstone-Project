@@ -75,6 +75,13 @@ const updateLguCredentialsSchema = z.object({
   password: z.string().min(8).optional(),
 });
 
+const trailMaterialSchema = z.object({
+  title: z.string().min(1),
+  materialType: z.enum(["video", "pdf", "file", "link"]),
+  resourceUrl: z.string().url().optional(),
+  description: z.string().min(1).optional(),
+});
+
 async function ensureLguAccessRequestTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS lgu_access_request (
@@ -148,6 +155,94 @@ export async function listTrails(_req: Request, res: Response) {
     trails: result.rows,
     count: result.rows.length,
   });
+}
+
+export async function listTrailMaterials(req: Request, res: Response) {
+  const trailId = String(req.params.trailId ?? "").trim();
+  if (!trailId) {
+    return sendError(res, "Trail ID is required", 400);
+  }
+
+  const trailResult = await query<{ trail_id: string }>(
+    "SELECT trail_id FROM trail WHERE trail_id = $1 LIMIT 1",
+    [trailId]
+  );
+  if (!trailResult.rows[0]) {
+    return sendError(res, "Trail not found", 404);
+  }
+
+  const result = await query(
+    `SELECT
+      trail_material_id,
+      trail_id,
+      manifest_id,
+      lgu_official_id,
+      title,
+      material_type,
+      resource_url,
+      description,
+      created_at
+     FROM trail_resource_material
+     WHERE trail_id = $1
+     ORDER BY created_at ASC, title ASC`,
+    [trailId]
+  );
+
+  return sendSuccess(res, {
+    trailMaterials: result.rows,
+    count: result.rows.length,
+  });
+}
+
+export async function createTrailMaterial(req: Request, res: Response) {
+  const parsed = trailMaterialSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, "Invalid trail material payload", 400, parsed.error.flatten());
+  }
+
+  const authReq = req as AuthenticatedRequest;
+  if (!authReq.auth) {
+    return sendError(res, "Authentication required", 401);
+  }
+
+  const trailId = String(req.params.trailId ?? "").trim();
+  if (!trailId) {
+    return sendError(res, "Trail ID is required", 400);
+  }
+
+  const trailResult = await query<{ trail_id: string }>(
+    "SELECT trail_id FROM trail WHERE trail_id = $1 LIMIT 1",
+    [trailId]
+  );
+  if (!trailResult.rows[0]) {
+    return sendError(res, "Trail not found", 404);
+  }
+
+  const materialId = crypto.randomUUID();
+  const result = await query(
+    `INSERT INTO trail_resource_material (
+      trail_material_id,
+      trail_id,
+      manifest_id,
+      lgu_official_id,
+      title,
+      material_type,
+      resource_url,
+      description
+    ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+    RETURNING *`,
+    [
+      materialId,
+      trailId,
+      authReq.auth.userId,
+      parsed.data.title,
+      parsed.data.materialType,
+      parsed.data.resourceUrl ?? null,
+      parsed.data.description ?? null,
+    ]
+  );
+
+  return sendSuccess(res, { trailMaterial: result.rows[0] }, 201);
 }
 
 export async function createTrail(req: Request, res: Response) {

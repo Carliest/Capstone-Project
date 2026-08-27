@@ -68,6 +68,16 @@ export type ManifestRequirementDocument = {
   created_at: string;
 };
 
+export type ManifestRequiredDocument = {
+  document_type_id: string;
+  manifest_id: string;
+  created_by_organizer_id: string;
+  document_name: string;
+  description: string | null;
+  is_required: boolean;
+  created_at: string;
+};
+
 export type ManifestComplianceDocument = {
   document_id: string;
   document_type_id: string;
@@ -124,5 +134,6 @@ export type ManifestRequirements = {
   manifestId: string;
   manifestItemId: string | null;
   trailMaterials: ManifestTrailMaterial[];
+  requiredDocuments?: ManifestRequiredDocument[];
   complianceDocuments: ManifestComplianceDocument[];
 };

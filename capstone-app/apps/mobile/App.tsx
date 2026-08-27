@@ -5,9 +5,23 @@ import { LoginPage } from "./src/screens/LoginPage";
 import { HikerRegistrationScreen } from "./src/screens/HikerRegistration";
 import { LandingPage } from "./src/screens/LandingPage";
 import { GroupPageStream } from "./src/screens/GroupPageStream";
+import { ManagementWorkspaceScreen } from "./src/screens/ManagementWorkspaceScreen";
 import type { JoinedGroup } from "./src/types/manifest";
 
-type ScreenKey = "landing" | "login" | "groups" | "hikerRegistration" | "groupStream";
+type ScreenKey =
+  | "landing"
+  | "login"
+  | "groups"
+  | "hikerRegistration"
+  | "groupStream"
+  | "organizerHub"
+  | "lguHub";
+
+type LoginResult = {
+  user: {
+    role: string;
+  };
+};
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenKey>("landing");
@@ -30,9 +44,20 @@ export default function App() {
           <LoginPage
             onBack={() => setScreen("landing")}
             onSignUp={() => setScreen("hikerRegistration")}
-            onCompleted={(summary) => {
-              setLastAction(summary);
-              setScreen(summary === "Logged In" ? "groups" : "landing");
+            onCompleted={(result: LoginResult) => {
+              setLastAction("Logged In");
+
+              if (result.user.role === "organizer") {
+                setScreen("organizerHub");
+                return;
+              }
+
+              if (result.user.role === "lgu_official") {
+                setScreen("lguHub");
+                return;
+              }
+
+              setScreen("groups");
             }}
           />
         ) : screen === "groups" ? (
@@ -50,6 +75,22 @@ export default function App() {
           <GroupPageStream
             manifest={selectedManifest}
             onBack={() => setScreen("groups")}
+          />
+        ) : screen === "organizerHub" ? (
+          <ManagementWorkspaceScreen
+            mode="organizer"
+            onLogout={() => {
+              setLastAction("Logged out");
+              setScreen("login");
+            }}
+          />
+        ) : screen === "lguHub" ? (
+          <ManagementWorkspaceScreen
+            mode="lgu_official"
+            onLogout={() => {
+              setLastAction("Logged out");
+              setScreen("login");
+            }}
           />
         ) : (
           <HikerRegistrationScreen

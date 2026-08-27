@@ -6,10 +6,12 @@ import {
   createCheckpointStation,
   createMountain,
   createTrail,
+  createTrailMaterial,
   deleteGuide,
   listCheckpointStations,
   listGuides,
   listMountains,
+  listTrailMaterials,
   listTrails,
   submitLguAccessRequest,
   updateOwnLguCredentials,
@@ -22,6 +24,8 @@ router.get("/mountains", authenticateToken, requireRole(["lgu_official"]), listM
 router.post("/mountains", authenticateToken, requireRole(["lgu_official"]), createMountain);
 router.get("/trails", authenticateToken, requireRole(["lgu_official"]), listTrails);
 router.post("/trails", authenticateToken, requireRole(["lgu_official"]), createTrail);
+router.get("/trails/:trailId/materials", authenticateToken, requireRole(["lgu_official"]), listTrailMaterials);
+router.post("/trails/:trailId/materials", authenticateToken, requireRole(["lgu_official"]), createTrailMaterial);
 router.get("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), listCheckpointStations);
 router.post("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), createCheckpointStation);
 router.get("/guides", authenticateToken, requireRole(["lgu_official"]), listGuides);
