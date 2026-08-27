@@ -105,6 +105,53 @@ function ensureTrailMaterialSchema() {
   return trailMaterialSchemaReady;
 }
 
+async function ensureLguProfileExists(userId: string) {
+  const existingProfile = await query<{ lgu_official_id: string }>(
+    "SELECT lgu_official_id FROM lgu_profile WHERE lgu_official_id = $1 LIMIT 1",
+    [userId]
+  );
+  if (existingProfile.rows[0]) {
+    return;
+  }
+
+  const userResult = await query<{
+    first_name: string;
+    last_name: string;
+    email: string;
+    address: string;
+  }>(
+    "SELECT first_name, last_name, email, address FROM users WHERE user_id = $1 LIMIT 1",
+    [userId]
+  );
+
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("LGU account not found");
+  }
+
+  await query(
+    `INSERT INTO lgu_profile (
+      lgu_official_id,
+      lgu_name,
+      province,
+      municipality_city,
+      office_name,
+      contact_person,
+      contact_number,
+      office_address,
+      is_active
+    ) VALUES ($1, $2, NULL, NULL, $3, $4, NULL, $5, TRUE)
+    ON CONFLICT (lgu_official_id) DO NOTHING`,
+    [
+      userId,
+      `${user.first_name} ${user.last_name}`.trim() || user.email,
+      `${user.first_name} ${user.last_name}`.trim() || user.email,
+      `${user.first_name} ${user.last_name}`.trim() || user.email,
+      user.address,
+    ]
+  );
+}
+
 async function ensureLguAccessRequestTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS lgu_access_request (
@@ -232,6 +279,16 @@ export async function createTrailMaterial(req: Request, res: Response) {
     return sendError(res, "Authentication required", 401);
   }
 
+  try {
+    await ensureLguProfileExists(authReq.auth.userId);
+  } catch (error) {
+    return sendError(
+      res,
+      error instanceof Error ? error.message : "Unable to provision LGU profile",
+      400
+    );
+  }
+
   const trailId = String(req.params.trailId ?? "").trim();
   if (!trailId) {
     return sendError(res, "Trail ID is required", 400);
@@ -246,28 +303,37 @@ export async function createTrailMaterial(req: Request, res: Response) {
   }
 
   const materialId = crypto.randomUUID();
-  const result = await query(
-    `INSERT INTO trail_resource_material (
-      trail_material_id,
-      trail_id,
-      manifest_id,
-      lgu_official_id,
-      title,
-      material_type,
-      resource_url,
-      description
-    ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
-    RETURNING *`,
-    [
-      materialId,
-      trailId,
-      authReq.auth.userId,
-      parsed.data.title,
-      parsed.data.materialType,
-      parsed.data.resourceUrl ?? null,
-      parsed.data.description ?? null,
-    ]
-  );
+  let result;
+  try {
+    result = await query(
+      `INSERT INTO trail_resource_material (
+        trail_material_id,
+        trail_id,
+        manifest_id,
+        lgu_official_id,
+        title,
+        material_type,
+        resource_url,
+        description
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+      RETURNING *`,
+      [
+        materialId,
+        trailId,
+        authReq.auth.userId,
+        parsed.data.title,
+        parsed.data.materialType,
+        parsed.data.resourceUrl ?? null,
+        parsed.data.description ?? null,
+      ]
+    );
+  } catch (error) {
+    return sendError(
+      res,
+      error instanceof Error ? error.message : "Unable to save trail material",
+      500
+    );
+  }
 
   return sendSuccess(res, { trailMaterial: result.rows[0] }, 201);
 }

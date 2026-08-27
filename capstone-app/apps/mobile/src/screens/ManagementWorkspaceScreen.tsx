@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import type { ReactNode } from "react";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
 import { ChevronRight, FileText, Mountain, Plus, Trash2 } from "lucide-react-native";
 import { createApiClient } from "../api";
 import { SyncStatusBanner } from "../components/SyncStatusBanner";
@@ -204,6 +203,24 @@ export function ManagementWorkspaceScreen({
     }
   }
 
+  async function resolveSessionToken() {
+    if (session?.token) {
+      return session.token;
+    }
+
+    const storedSession = await readStoredValue(SESSION_STORAGE_KEY);
+    if (!storedSession) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(storedSession) as SessionPayload;
+      return parsed?.token ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function loadTrailsForOrganizer(token: string) {
     await runWithSyncTracking(async () => {
       const result = await apiClient!.get<TrailsResponse>("/api/manifests/available-trails", token);
@@ -229,7 +246,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function loadTemplates(manifestId: string) {
-    if (!session?.token) {
+    const token = await resolveSessionToken();
+    if (!token) {
       return;
     }
 
@@ -237,7 +255,7 @@ export function ManagementWorkspaceScreen({
     try {
       const result = await apiClient!.get<TemplatesResponse>(
         `/api/compliance/document-types?manifestId=${encodeURIComponent(manifestId)}`,
-        session.token
+        token
       );
       setTemplates(result.documentTypes);
     } catch (error) {
@@ -251,7 +269,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function loadMaterials(trailId: string) {
-    if (!session?.token) {
+    const token = await resolveSessionToken();
+    if (!token) {
       return;
     }
 
@@ -259,7 +278,7 @@ export function ManagementWorkspaceScreen({
     try {
       const result = await apiClient!.get<TrailMaterialsResponse>(
         `/api/lgu/trails/${encodeURIComponent(trailId)}/materials`,
-        session.token
+        token
       );
       setMaterials(result.trailMaterials);
     } catch (error) {
@@ -273,7 +292,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function handleCreateManifest() {
-    if (!session?.token || !selectedTrailId || !climbDate.trim()) {
+    const token = await resolveSessionToken();
+    if (!token || !selectedTrailId || !climbDate.trim()) {
       setStatusMessage("Please choose a trail and climb date.");
       return;
     }
@@ -285,7 +305,7 @@ export function ManagementWorkspaceScreen({
         return apiClient!.post<ManifestCreateResponse>(
           "/api/manifests/create",
           { trailId: selectedTrailId, climbDate: climbDate.trim() },
-          session.token
+          token
         );
       });
 
@@ -303,7 +323,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function handleCreateTemplate() {
-    if (!session?.token || !selectedManifestId.trim() || !templateName.trim()) {
+    const token = await resolveSessionToken();
+    if (!token || !selectedManifestId.trim() || !templateName.trim()) {
       setStatusMessage("Please enter a manifest ID and template name.");
       return;
     }
@@ -320,7 +341,7 @@ export function ManagementWorkspaceScreen({
             description: templateDescription.trim() || undefined,
             isRequired,
           },
-          session.token
+          token
         );
       });
 
@@ -340,7 +361,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function handleCreateMaterial() {
-    if (!session?.token || !selectedTrailId.trim() || !materialTitle.trim()) {
+    const token = await resolveSessionToken();
+    if (!token || !selectedTrailId.trim() || !materialTitle.trim()) {
       setStatusMessage("Please choose a trail and enter a title.");
       return;
     }
@@ -367,7 +389,7 @@ export function ManagementWorkspaceScreen({
             resourceUrl: materialUrl.trim() || undefined,
             description: materialDescription.trim() || undefined,
           },
-          session.token
+          token
         );
       });
 
@@ -385,7 +407,8 @@ export function ManagementWorkspaceScreen({
   }
 
   async function handlePickMaterialFile() {
-    if (!session?.token) {
+    const token = await resolveSessionToken();
+    if (!token) {
       setStatusMessage("Please log in again.");
       return;
     }
@@ -410,13 +433,7 @@ export function ManagementWorkspaceScreen({
         return;
       }
 
-      const base64Content =
-        asset.base64 ??
-        (await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        }));
-      const mimeType = asset.mimeType ?? "application/octet-stream";
-      setMaterialUrl(`data:${mimeType};base64,${base64Content}`);
+      setMaterialUrl(asset.uri);
       setMaterialFileName(asset.name ?? "Selected file");
       setStatusMessage(`Selected ${asset.name ?? "file"} from the device.`);
       setLastSyncedAt(Date.now());
