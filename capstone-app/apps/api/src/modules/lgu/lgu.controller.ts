@@ -116,6 +116,11 @@ function ensureTrailMaterialSchema() {
 
       await query(`
         ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS file_url TEXT;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
           ALTER COLUMN manifest_id DROP NOT NULL;
       `);
     })().catch((error) => {
@@ -313,6 +318,7 @@ export async function listTrailMaterials(req: Request, res: Response) {
       material_type,
       file_name,
       mime_type,
+      file_url,
       resource_url,
       description,
       created_at
@@ -383,9 +389,10 @@ export async function createTrailMaterial(req: Request, res: Response) {
         material_type,
         file_name,
         mime_type,
+        file_url,
         resource_url,
         description
-      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *`,
       [
         materialId,
@@ -395,6 +402,7 @@ export async function createTrailMaterial(req: Request, res: Response) {
         materialType,
         parsed.data.fileName ?? null,
         parsed.data.mimeType ?? null,
+        parsed.data.resourceUrl ?? null,
         parsed.data.resourceUrl ?? null,
         parsed.data.description ?? null,
       ]
