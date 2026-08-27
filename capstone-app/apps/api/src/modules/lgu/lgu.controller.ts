@@ -99,6 +99,11 @@ function ensureTrailMaterialSchema() {
 
       await query(`
         ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS lgu_official_id UUID;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
           ALTER COLUMN manifest_id DROP NOT NULL;
       `);
     })().catch((error) => {
