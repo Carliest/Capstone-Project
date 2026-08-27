@@ -89,6 +89,11 @@ function ensureTrailMaterialSchema() {
     trailMaterialSchemaReady = (async () => {
       await query(`
         ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS trail_material_id UUID;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
           ADD COLUMN IF NOT EXISTS trail_id UUID;
       `);
 
