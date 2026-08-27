@@ -78,9 +78,32 @@ const updateLguCredentialsSchema = z.object({
 const trailMaterialSchema = z.object({
   title: z.string().min(1),
   materialType: z.enum(["video", "pdf", "file", "link"]),
-  resourceUrl: z.string().url().optional(),
+  resourceUrl: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
 });
+
+let trailMaterialSchemaReady: Promise<void> | null = null;
+
+function ensureTrailMaterialSchema() {
+  if (!trailMaterialSchemaReady) {
+    trailMaterialSchemaReady = (async () => {
+      await query(`
+        ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS trail_id UUID;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
+          ALTER COLUMN manifest_id DROP NOT NULL;
+      `);
+    })().catch((error) => {
+      trailMaterialSchemaReady = null;
+      throw error;
+    });
+  }
+
+  return trailMaterialSchemaReady;
+}
 
 async function ensureLguAccessRequestTable() {
   await query(`
@@ -158,6 +181,8 @@ export async function listTrails(_req: Request, res: Response) {
 }
 
 export async function listTrailMaterials(req: Request, res: Response) {
+  await ensureTrailMaterialSchema();
+
   const trailId = String(req.params.trailId ?? "").trim();
   if (!trailId) {
     return sendError(res, "Trail ID is required", 400);
@@ -195,6 +220,8 @@ export async function listTrailMaterials(req: Request, res: Response) {
 }
 
 export async function createTrailMaterial(req: Request, res: Response) {
+  await ensureTrailMaterialSchema();
+
   const parsed = trailMaterialSchema.safeParse(req.body);
   if (!parsed.success) {
     return sendError(res, "Invalid trail material payload", 400, parsed.error.flatten());

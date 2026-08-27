@@ -11,6 +11,8 @@ import {
   View,
 } from "react-native";
 import type { ReactNode } from "react";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { ChevronRight, FileText, Mountain, Plus, Trash2 } from "lucide-react-native";
 import { createApiClient } from "../api";
 import { SyncStatusBanner } from "../components/SyncStatusBanner";
@@ -80,7 +82,8 @@ type TemplatesResponse = {
 };
 
 type TrailsResponse = {
-  trails: TrailOption[];
+  trails?: TrailOption[];
+  availableTrails?: TrailOption[];
   count: number;
 };
 
@@ -121,12 +124,15 @@ export function ManagementWorkspaceScreen({
   const [materialTitle, setMaterialTitle] = useState("");
   const [materialType, setMaterialType] = useState<TrailMaterial["material_type"]>("pdf");
   const [materialUrl, setMaterialUrl] = useState("");
+  const [materialFileName, setMaterialFileName] = useState("");
   const [materialDescription, setMaterialDescription] = useState("");
   const [isSavingMaterial, setIsSavingMaterial] = useState(false);
   const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
+  const [isPickingMaterialFile, setIsPickingMaterialFile] = useState(false);
 
   const isSyncing = activeSyncOperations > 0;
   const isOrganizerMode = mode === "organizer";
+  const safeTrails = Array.isArray(trails) ? trails : [];
 
   useEffect(() => {
     void bootstrap();
@@ -145,8 +151,8 @@ export function ManagementWorkspaceScreen({
   }, [isOrganizerMode, selectedTrailId]);
 
   const selectedTrail = useMemo(
-    () => trails.find((trail) => trail.trail_id === selectedTrailId) ?? null,
-    [trails, selectedTrailId]
+    () => safeTrails.find((trail) => trail.trail_id === selectedTrailId) ?? null,
+    [safeTrails, selectedTrailId]
   );
 
   const screenTitle = isOrganizerMode
@@ -201,9 +207,10 @@ export function ManagementWorkspaceScreen({
   async function loadTrailsForOrganizer(token: string) {
     await runWithSyncTracking(async () => {
       const result = await apiClient!.get<TrailsResponse>("/api/manifests/available-trails", token);
-      setTrails(result.trails);
-      if (!selectedTrailId && result.trails.length > 0) {
-        setSelectedTrailId(result.trails[0].trail_id);
+      const normalizedTrails = result.availableTrails ?? result.trails ?? [];
+      setTrails(normalizedTrails);
+      if (!selectedTrailId && normalizedTrails.length > 0) {
+        setSelectedTrailId(normalizedTrails[0].trail_id);
       }
       setLastSyncedAt(Date.now());
     });
@@ -212,9 +219,10 @@ export function ManagementWorkspaceScreen({
   async function loadTrailsForLgu(token: string) {
     await runWithSyncTracking(async () => {
       const result = await apiClient!.get<TrailsResponse>("/api/lgu/trails", token);
-      setTrails(result.trails);
-      if (!selectedTrailId && result.trails.length > 0) {
-        setSelectedTrailId(result.trails[0].trail_id);
+      const normalizedTrails = result.trails ?? result.availableTrails ?? [];
+      setTrails(normalizedTrails);
+      if (!selectedTrailId && normalizedTrails.length > 0) {
+        setSelectedTrailId(normalizedTrails[0].trail_id);
       }
       setLastSyncedAt(Date.now());
     });
@@ -337,6 +345,16 @@ export function ManagementWorkspaceScreen({
       return;
     }
 
+    if (materialType === "link" && !materialUrl.trim()) {
+      setStatusMessage("Please enter a resource URL.");
+      return;
+    }
+
+    if (materialType !== "link" && !materialUrl.trim()) {
+      setStatusMessage("Please pick a file from the device for this material.");
+      return;
+    }
+
     setIsSavingMaterial(true);
     setStatusMessage("");
     try {
@@ -363,6 +381,49 @@ export function ManagementWorkspaceScreen({
       setStatusMessage(error instanceof Error ? error.message : "Unable to save material.");
     } finally {
       setIsSavingMaterial(false);
+    }
+  }
+
+  async function handlePickMaterialFile() {
+    if (!session?.token) {
+      setStatusMessage("Please log in again.");
+      return;
+    }
+
+    setIsPickingMaterialFile(true);
+    setStatusMessage("");
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: false,
+        copyToCacheDirectory: true,
+        base64: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets?.[0];
+      if (!asset) {
+        setStatusMessage("No file was selected.");
+        return;
+      }
+
+      const base64Content =
+        asset.base64 ??
+        (await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        }));
+      const mimeType = asset.mimeType ?? "application/octet-stream";
+      setMaterialUrl(`data:${mimeType};base64,${base64Content}`);
+      setMaterialFileName(asset.name ?? "Selected file");
+      setStatusMessage(`Selected ${asset.name ?? "file"} from the device.`);
+      setLastSyncedAt(Date.now());
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to pick file.");
+    } finally {
+      setIsPickingMaterialFile(false);
     }
   }
 
@@ -573,7 +634,34 @@ export function ManagementWorkspaceScreen({
                 </View>
 
                 <Field label="Material Title" value={materialTitle} onChangeText={setMaterialTitle} placeholder="Leave No Trace Guide" />
-                <Field label="Resource URL" value={materialUrl} onChangeText={setMaterialUrl} placeholder="https://..." />
+                {materialType === "link" ? (
+                  <Field
+                    label="Resource URL"
+                    value={materialUrl}
+                    onChangeText={setMaterialUrl}
+                    placeholder="https://..."
+                  />
+                ) : (
+                  <View style={styles.filePickerBlock}>
+                    <Pressable
+                      onPress={handlePickMaterialFile}
+                      disabled={isPickingMaterialFile}
+                      style={({ pressed }) => [
+                        styles.secondaryButton,
+                        (pressed || isPickingMaterialFile) && styles.buttonPressed,
+                      ]}
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {isPickingMaterialFile ? "Picking File..." : "Choose File From Device"}
+                      </Text>
+                    </Pressable>
+                    <Text style={styles.mutedText}>
+                      {materialFileName
+                        ? `Selected file: ${materialFileName}`
+                        : "No device file selected yet."}
+                    </Text>
+                  </View>
+                )}
                 <Field
                   label="Description"
                   value={materialDescription}
@@ -586,7 +674,14 @@ export function ManagementWorkspaceScreen({
                   {(["video", "pdf", "file", "link"] as const).map((value) => (
                     <Pressable
                       key={value}
-                      onPress={() => setMaterialType(value)}
+                      onPress={() => {
+                        setMaterialType(value);
+                        if (value === "link") {
+                          setMaterialFileName("");
+                        } else {
+                          setMaterialUrl("");
+                        }
+                      }}
                       style={({ pressed }) => [
                         styles.typeChip,
                         materialType === value && styles.typeChipSelected,
@@ -945,6 +1040,9 @@ const styles = StyleSheet.create({
   typeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 8,
+  },
+  filePickerBlock: {
     gap: 8,
   },
   typeChip: {
