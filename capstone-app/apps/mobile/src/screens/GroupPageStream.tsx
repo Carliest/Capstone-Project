@@ -7,7 +7,10 @@ import { EventHeroSection } from "../components/EventHeroSection";
 import { EventNavigationTabsSection, type NavigationTab } from "../components/EventNavigationTabsSection";
 import { EventStreamCard } from "../components/EventStreamCard";
 import { PendingTasksAlertSection } from "../components/PendingTasksAlertSection";
+import { SyncStatusBanner } from "../components/SyncStatusBanner";
 import { readStoredValue, SESSION_STORAGE_KEY } from "../storage";
+import { getCachedTimestamp, getCachedValue, setCachedValue } from "../offlineCache";
+import { useBackendSyncStatus } from "../hooks/useBackendSyncStatus";
 import type {
   JoinedGroup,
   ManifestAnnouncement,
@@ -57,6 +60,16 @@ type PeopleResponse = {
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim() ?? "";
 const apiClient = apiBaseUrl ? createApiClient(apiBaseUrl) : null;
+const MANIFEST_CACHE_PREFIX = "offline-cache:manifest:";
+
+type ManifestSnapshot = {
+  announcements: AnnouncementsResponse["announcements"];
+  trailMaterials: ManifestTrailMaterial[];
+  complianceDocuments: ManifestComplianceDocument[];
+  trail: ManifestTrail | null;
+  trailGps: ManifestTrail["gps"];
+  people: ManifestPerson[];
+};
 
 export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
   const [activeTab, setActiveTab] = useState<NavigationTab>("Stream");
@@ -70,8 +83,12 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSavingCheckpoint, setIsSavingCheckpoint] = useState(false);
+  const [activeSyncOperations, setActiveSyncOperations] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const backendSync = useBackendSyncStatus(apiBaseUrl);
 
   const manifestId = manifest?.manifest_id ?? null;
+  const isSyncing = activeSyncOperations > 0;
 
   const pendingCount = useMemo(() => {
     const compliancePending = complianceDocuments.filter(
@@ -96,15 +113,9 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
       return;
     }
 
-    if (!apiClient) {
-      setStatusMessage("Set EXPO_PUBLIC_API_URL to your backend URL before loading the room.");
-      setIsLoading(false);
-      return;
-    }
-
     const storedSession = await readStoredValue(SESSION_STORAGE_KEY);
     if (!storedSession) {
-      setStatusMessage("Please log in again to view the stream.");
+      await loadCachedManifest(manifestId, "Please log in again to view the stream.");
       setIsLoading(false);
       return;
     }
@@ -116,68 +127,99 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
       }
 
       setSession(parsed);
+      if (!apiClient) {
+        await loadCachedManifest(
+          manifestId,
+          "Set EXPO_PUBLIC_API_URL to your backend URL before loading the room."
+        );
+        return;
+      }
+
       await loadManifestData(parsed.token, manifestId);
       setStatusMessage("");
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Unable to load the stream.");
+      await loadCachedManifest(
+        manifestId,
+        error instanceof Error ? error.message : "Unable to load the stream."
+      );
     } finally {
       setIsLoading(false);
     }
   }
 
   async function loadManifestData(token: string, id: string) {
-    const results = await Promise.allSettled([
-      apiClient!.get<AnnouncementsResponse>(`/api/announcements?manifestId=${encodeURIComponent(id)}`, token),
-      apiClient!.get<TrailMaterialsResponse>(`/api/manifests/${id}/trail-materials`, token),
-      apiClient!.get<RequirementsResponse>(`/api/manifests/${id}/requirements`, token),
-      apiClient!.get<TrailResponse>(`/api/manifests/${id}/trail`, token),
-      apiClient!.get<PeopleResponse>(`/api/manifests/${id}/people`, token),
-    ]);
+    return runWithSyncTracking(async () => {
+      const results = await Promise.allSettled([
+        apiClient!.get<AnnouncementsResponse>(`/api/announcements?manifestId=${encodeURIComponent(id)}`, token),
+        apiClient!.get<TrailMaterialsResponse>(`/api/manifests/${id}/trail-materials`, token),
+        apiClient!.get<RequirementsResponse>(`/api/manifests/${id}/requirements`, token),
+        apiClient!.get<TrailResponse>(`/api/manifests/${id}/trail`, token),
+        apiClient!.get<PeopleResponse>(`/api/manifests/${id}/people`, token),
+      ]);
 
-    const sectionErrors: string[] = [];
+      const sectionErrors: string[] = [];
+      const snapshot: ManifestSnapshot = {
+        announcements: [],
+        trailMaterials: [],
+        complianceDocuments: [],
+        trail: null,
+        trailGps: null,
+        people: [],
+      };
 
-    const announcementsResult = results[0];
-    if (announcementsResult.status === "fulfilled") {
-      setAnnouncements(announcementsResult.value.announcements);
-    } else {
-      sectionErrors.push("announcements");
-    }
-
-    const trailMaterialsResult = results[1];
-    if (trailMaterialsResult.status === "fulfilled") {
-      setTrailMaterials(trailMaterialsResult.value.trailMaterials);
-    } else {
-      sectionErrors.push("trail materials");
-    }
-
-    const requirementsResult = results[2];
-    if (requirementsResult.status === "fulfilled") {
-      setComplianceDocuments(requirementsResult.value.requirements.complianceDocuments);
-      if (trailMaterialsResult.status !== "fulfilled") {
-        setTrailMaterials(requirementsResult.value.requirements.trailMaterials);
+      const announcementsResult = results[0];
+      if (announcementsResult.status === "fulfilled") {
+        snapshot.announcements = announcementsResult.value.announcements;
+      } else {
+        sectionErrors.push("announcements");
       }
-    } else {
-      sectionErrors.push("requirements");
-    }
 
-    const trailResult = results[3];
-    if (trailResult.status === "fulfilled") {
-      setTrail(trailResult.value.trail);
-      setTrailGps(trailResult.value.gps);
-    } else {
-      sectionErrors.push("trail");
-    }
+      const trailMaterialsResult = results[1];
+      if (trailMaterialsResult.status === "fulfilled") {
+        snapshot.trailMaterials = trailMaterialsResult.value.trailMaterials;
+      } else {
+        sectionErrors.push("trail materials");
+      }
 
-    const peopleResult = results[4];
-    if (peopleResult.status === "fulfilled") {
-      setPeople(peopleResult.value.people);
-    } else {
-      sectionErrors.push("people");
-    }
+      const requirementsResult = results[2];
+      if (requirementsResult.status === "fulfilled") {
+        snapshot.complianceDocuments = requirementsResult.value.requirements.complianceDocuments;
+        if (trailMaterialsResult.status !== "fulfilled") {
+          snapshot.trailMaterials = requirementsResult.value.requirements.trailMaterials;
+        }
+      } else {
+        sectionErrors.push("requirements");
+      }
 
-    if (sectionErrors.length > 0) {
-      setStatusMessage(`Some sections could not be loaded: ${sectionErrors.join(", ")}.`);
-    }
+      const trailResult = results[3];
+      if (trailResult.status === "fulfilled") {
+        snapshot.trail = trailResult.value.trail;
+        snapshot.trailGps = trailResult.value.gps;
+      } else {
+        sectionErrors.push("trail");
+      }
+
+      const peopleResult = results[4];
+      if (peopleResult.status === "fulfilled") {
+        snapshot.people = peopleResult.value.people;
+      } else {
+        sectionErrors.push("people");
+      }
+
+      setAnnouncements(snapshot.announcements);
+      setTrailMaterials(snapshot.trailMaterials);
+      setComplianceDocuments(snapshot.complianceDocuments);
+      setTrail(snapshot.trail);
+      setTrailGps(snapshot.trailGps);
+      setPeople(snapshot.people);
+
+      await setCachedValue(`${MANIFEST_CACHE_PREFIX}${id}`, snapshot);
+      setLastSyncedAt(Date.now());
+
+      if (sectionErrors.length > 0) {
+        setStatusMessage(`Some sections could not be loaded: ${sectionErrors.join(", ")}.`);
+      }
+    });
   }
 
   async function handleCheckpointLog(checkpoint: ManifestCheckpoint) {
@@ -185,24 +227,53 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
       return;
     }
 
-    setIsSavingCheckpoint(true);
     try {
-      await apiClient.post(
-        "/api/tracking/checkpoint-log",
-        {
-          manifestId,
-          checkpointId: checkpoint.checkpoint_id,
-        },
-        session.token
-      );
+      setIsSavingCheckpoint(true);
+      await runWithSyncTracking(async () => {
+        await apiClient.post(
+          "/api/tracking/checkpoint-log",
+          {
+            manifestId,
+            checkpointId: checkpoint.checkpoint_id,
+          },
+          session.token
+        );
 
-      await loadManifestData(session.token, manifestId);
-      Alert.alert("Checkpoint saved", `${checkpoint.checkpoint_name} timestamp recorded.`);
+        await loadManifestData(session.token, manifestId);
+        Alert.alert("Checkpoint saved", `${checkpoint.checkpoint_name} timestamp recorded.`);
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save checkpoint.";
       Alert.alert("Checkpoint failed", message);
     } finally {
       setIsSavingCheckpoint(false);
+    }
+  }
+
+  async function loadCachedManifest(id: string, fallbackMessage: string) {
+    const cached = await getCachedValue<ManifestSnapshot>(`${MANIFEST_CACHE_PREFIX}${id}`);
+    if (!cached) {
+      setStatusMessage(fallbackMessage);
+      return;
+    }
+
+    setAnnouncements(cached.announcements ?? []);
+    setTrailMaterials(cached.trailMaterials ?? []);
+    setComplianceDocuments(cached.complianceDocuments ?? []);
+    setTrail(cached.trail ?? null);
+    setTrailGps(cached.trailGps ?? null);
+    setPeople(cached.people ?? []);
+    const cachedTimestamp = await getCachedTimestamp(`${MANIFEST_CACHE_PREFIX}${id}`);
+    setLastSyncedAt(cachedTimestamp);
+    setStatusMessage("Offline mode: showing the last synced manifest data from SQLite.");
+  }
+
+  async function runWithSyncTracking<T>(task: () => Promise<T>) {
+    setActiveSyncOperations((current) => current + 1);
+    try {
+      return await task();
+    } finally {
+      setActiveSyncOperations((current) => Math.max(0, current - 1));
     }
   }
 
@@ -215,6 +286,13 @@ export function GroupPageStream({ manifest, onBack }: GroupPageStreamProps) {
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <EventHeroSection manifest={manifest} onBack={onBack} />
+        <SyncStatusBanner
+          title="manifest room"
+          isOnline={backendSync.isOnline}
+          isChecking={backendSync.isChecking}
+          isSyncing={isSyncing}
+          lastSyncedAt={lastSyncedAt}
+        />
         <PendingTasksAlertSection pendingCount={pendingCount || 0} />
         <EventNavigationTabsSection activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -471,10 +549,15 @@ function PeopleTab({
     (person) => person.manifest_role === "organizer" || person.manifest_role === "guide"
   );
   const hikers = people.filter((person) => person.manifest_role === "hiker");
+  const fallbackOrganizerCount = organizerAndGuide.length > 0 || !manifest?.organizer_name ? 0 : 1;
+  const visiblePeopleCount = organizerAndGuide.length + hikers.length + fallbackOrganizerCount;
 
   return (
     <View style={styles.tabStack}>
-      <SectionHeader title="Manifest room" subtitle="Organizer, guide, and hikers assigned to this expedition." />
+      <SectionHeader
+        title={`Manifest room (${visiblePeopleCount})`}
+        subtitle="Organizer, guide, and hikers assigned to this expedition."
+      />
 
       {organizerAndGuide.length > 0 ? (
         <PeopleSection title="Organizer & Guide" people={organizerAndGuide} />

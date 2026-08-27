@@ -35,6 +35,7 @@ export type LookupManifest = {
   guide_name: string | null;
   capacity_total: number | null;
   capacity_used: number | null;
+  joined_count?: number;
   description: string;
 };
 

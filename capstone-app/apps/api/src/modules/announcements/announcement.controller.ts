@@ -15,6 +15,34 @@ const listSchema = z.object({
   manifestId: z.string().min(1).optional(),
 });
 
+async function assertManifestOwner(manifestId: string, userId: string) {
+  const result = await query<{
+    manifest_id: string;
+    organizer_id: string;
+  }>(
+    `SELECT manifest_id, organizer_id
+     FROM expedition_manifest
+     WHERE manifest_id = $1
+     LIMIT 1`,
+    [manifestId]
+  );
+
+  const manifest = result.rows[0];
+  if (!manifest) {
+    return { ok: false as const, status: 404, message: "Manifest not found" };
+  }
+
+  if (manifest.organizer_id !== userId) {
+    return {
+      ok: false as const,
+      status: 403,
+      message: "Only the room creator can manage announcements",
+    };
+  }
+
+  return { ok: true as const, manifest };
+}
+
 export async function listAnnouncements(req: Request, res: Response) {
   const parsed = listSchema.safeParse(req.query);
   if (!parsed.success) {
@@ -62,6 +90,18 @@ export async function createAnnouncement(req: Request, res: Response) {
   const authReq = req as AuthenticatedRequest;
   if (!authReq.auth) {
     return sendError(res, "Authentication required", 401);
+  }
+
+  if (authReq.auth.role !== "organizer") {
+    return sendError(res, "Only organizers can create announcements", 403);
+  }
+
+  const ownershipCheck = await assertManifestOwner(
+    parsed.data.manifestId,
+    authReq.auth.userId
+  );
+  if (!ownershipCheck.ok) {
+    return sendError(res, ownershipCheck.message, ownershipCheck.status);
   }
 
   const announcementId = crypto.randomUUID();

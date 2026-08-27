@@ -141,7 +141,7 @@ function formatPreviewDate(dateValue: string | null | undefined) {
 }
 
 function formatSlots(manifest: ManifestCardData) {
-  const used = manifest.current_trail_occupancy ?? manifest.joined_count ?? 0;
+  const used = manifest.joined_count ?? manifest.current_trail_occupancy ?? 0;
   const total = manifest.daily_carrying_capacity ?? 0;
 
   if (!total) {
@@ -152,7 +152,7 @@ function formatSlots(manifest: ManifestCardData) {
 }
 
 function getOccupancyPercent(manifest: ManifestCardData) {
-  const used = manifest.current_trail_occupancy ?? manifest.joined_count ?? 0;
+  const used = manifest.joined_count ?? manifest.current_trail_occupancy ?? 0;
   const total = manifest.daily_carrying_capacity ?? 0;
 
   if (!total) {

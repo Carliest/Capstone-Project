@@ -6,6 +6,7 @@
     "@expo/ngrok": "^4.1.0",
     "expo": "~57.0.14",
     "expo-image-picker": "~57.0.5",
+    "expo-sqlite": "~57.0.1",
     "expo-secure-store": "~57.0.1",
     "expo-status-bar": "~57.0.1",
     "lucide-react-native": "^1.33.0",

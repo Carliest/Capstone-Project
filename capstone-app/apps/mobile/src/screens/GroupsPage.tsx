@@ -25,11 +25,14 @@ import {
 } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { createApiClient } from "../api";
+import { SyncStatusBanner } from "../components/SyncStatusBanner";
 import {
   SESSION_STORAGE_KEY,
   deleteStoredValue,
   readStoredValue,
 } from "../storage";
+import { getCachedTimestamp, getCachedValue, setCachedValue } from "../offlineCache";
+import { useBackendSyncStatus } from "../hooks/useBackendSyncStatus";
 import { BottomNavigation } from "../components/BottomNavigation";
 import { ManifestCard } from "../components/ManifestCard";
 import type { JoinedGroup, LookupManifest } from "../types/manifest";
@@ -65,6 +68,8 @@ type LookupResponse = {
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim() ?? "";
 const apiClient = apiBaseUrl ? createApiClient(apiBaseUrl) : null;
+const GROUPS_CACHE_KEY = "offline-cache:groups";
+const MANIFEST_LOOKUP_CACHE_PREFIX = "offline-cache:manifest-lookup:";
 
 export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
   const [session, setSession] = useState<SessionPayload | null>(null);
@@ -77,6 +82,11 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
   const [preview, setPreview] = useState<LookupManifest | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("Groups");
+  const [activeSyncOperations, setActiveSyncOperations] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const backendSync = useBackendSyncStatus(apiBaseUrl);
+
+  const isSyncing = activeSyncOperations > 0;
 
   useEffect(() => {
     void bootstrap();
@@ -106,14 +116,6 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
   }
 
   async function bootstrap() {
-    if (!apiClient) {
-      setStatusMessage(
-        "Set EXPO_PUBLIC_API_URL to your Render backend URL before loading groups."
-      );
-      setIsLoadingGroups(false);
-      return;
-    }
-
     const storedSession = await readStoredValue(SESSION_STORAGE_KEY);
     if (!storedSession) {
       setStatusMessage("Please log in again to view your groups.");
@@ -128,8 +130,32 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
       }
 
       setSession(parsed);
+      if (!apiClient) {
+        const cachedGroups = await getCachedGroups();
+        if (cachedGroups) {
+          setStatusMessage(
+            "Offline mode: showing your last synced groups from SQLite."
+          );
+          return;
+        }
+
+        setStatusMessage(
+          "Set EXPO_PUBLIC_API_URL to your backend URL before loading groups."
+        );
+        return;
+      }
+
       await loadGroups(parsed.token);
+      setStatusMessage("");
     } catch (error) {
+      const cachedGroups = await getCachedGroups();
+      if (cachedGroups) {
+        setStatusMessage(
+          "Offline mode: showing your last synced groups from SQLite."
+        );
+        return;
+      }
+
       setStatusMessage(
         error instanceof Error ? error.message : "Unable to load your session."
       );
@@ -139,8 +165,12 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
   }
 
   async function loadGroups(token: string) {
-    const result = await apiClient!.get<GroupsResponse>("/api/manifests/mine", token);
-    setGroups(result.groups);
+    return runWithSyncTracking(async () => {
+      const result = await apiClient!.get<GroupsResponse>("/api/manifests/mine", token);
+      setGroups(result.groups);
+      await setCachedValue(GROUPS_CACHE_KEY, result);
+      setLastSyncedAt(Date.now());
+    });
   }
 
   async function lookupManifest(roomCodeInput?: string) {
@@ -155,18 +185,34 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
       return;
     }
 
-    setIsSearching(true);
-    setStatusMessage("");
-
     try {
-      const result = await apiClient!.get<LookupResponse>(
-        `/api/manifests/lookup?roomCode=${encodeURIComponent(code)}`,
-        session.token
-      );
+      setIsSearching(true);
+      setStatusMessage("");
 
-      setPreview(result.manifest);
-      setIsPreviewOpen(true);
+      await runWithSyncTracking(async () => {
+        const result = await apiClient!.get<LookupResponse>(
+          `/api/manifests/lookup?roomCode=${encodeURIComponent(code)}`,
+          session.token
+        );
+
+        setPreview(result.manifest);
+        setIsPreviewOpen(true);
+        await setCachedValue(`${MANIFEST_LOOKUP_CACHE_PREFIX}${code}`, result.manifest);
+        setLastSyncedAt(Date.now());
+      });
     } catch (error) {
+      const cachedPreview = await getCachedValue<LookupManifest>(
+        `${MANIFEST_LOOKUP_CACHE_PREFIX}${code}`
+      );
+      if (cachedPreview) {
+        setPreview(cachedPreview);
+        setIsPreviewOpen(true);
+        setStatusMessage(
+          "Offline mode: showing the last cached manifest preview for that room code."
+        );
+        return;
+      }
+
       const message =
         error instanceof Error ? error.message : "Unable to load manifest.";
       setStatusMessage(message);
@@ -188,24 +234,26 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
       return;
     }
 
-    setIsJoining(true);
-    setStatusMessage("");
-
     try {
-      const result = await apiClient!.post<JoinResponse>(
-        "/api/manifests/join",
-        { roomCode: code },
-        session.token
-      );
+      setIsJoining(true);
+      setStatusMessage("");
 
-      await loadGroups(session.token);
-      setIsPreviewOpen(false);
-      setPreview(null);
-      setRoomCode("");
-      Alert.alert(
-        "Group joined",
-        result.message ?? "You have been added to the expedition group."
-      );
+      await runWithSyncTracking(async () => {
+        const result = await apiClient!.post<JoinResponse>(
+          "/api/manifests/join",
+          { roomCode: code },
+          session.token
+        );
+
+        await loadGroups(session.token);
+        setIsPreviewOpen(false);
+        setPreview(null);
+        setRoomCode("");
+        Alert.alert(
+          "Group joined",
+          result.message ?? "You have been added to the expedition group."
+        );
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to join the group.";
@@ -221,6 +269,27 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
       await deleteStoredValue(SESSION_STORAGE_KEY);
     } finally {
       onLogout();
+    }
+  }
+
+  async function getCachedGroups() {
+    const cached = await getCachedValue<GroupsResponse>(GROUPS_CACHE_KEY);
+    if (!cached?.groups?.length) {
+      return null;
+    }
+
+    setGroups(cached.groups);
+    const cachedTimestamp = await getCachedTimestamp(GROUPS_CACHE_KEY);
+    setLastSyncedAt(cachedTimestamp);
+    return cached;
+  }
+
+  async function runWithSyncTracking<T>(task: () => Promise<T>) {
+    setActiveSyncOperations((current) => current + 1);
+    try {
+      return await task();
+    } finally {
+      setActiveSyncOperations((current) => Math.max(0, current - 1));
     }
   }
 
@@ -276,6 +345,14 @@ export function GroupsPage({ onLogout, onOpenStream }: GroupsPageProps) {
               </Pressable>
             </View>
           </View>
+
+          <SyncStatusBanner
+            title="groups"
+            isOnline={backendSync.isOnline}
+            isChecking={backendSync.isChecking}
+            isSyncing={isSyncing}
+            lastSyncedAt={lastSyncedAt}
+          />
 
           {showManifestList ? (
             <View style={styles.listSection}>
@@ -534,7 +611,7 @@ function formatPreviewSlots(preview: LookupManifest | null) {
   }
 
   const total = preview.capacity_total ?? preview.daily_carrying_capacity;
-  const used = preview.capacity_used ?? 0;
+  const used = preview.joined_count ?? preview.capacity_used ?? 0;
   if (!total || total <= 0) {
     return `${used}/--`;
   }

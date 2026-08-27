@@ -36,7 +36,7 @@ export function EventHeroSection({ manifest, onBack }: EventHeroSectionProps) {
           <MetaItem icon={<CalendarDays size={12} color="#dfead9" />} label={formatDate(manifest?.climb_date)} />
           <MetaItem
             icon={<Users size={12} color="#dfead9" />}
-            label={formatSlots(manifest?.current_trail_occupancy, manifest?.daily_carrying_capacity)}
+            label={formatSlots(manifest?.joined_count, manifest?.daily_carrying_capacity)}
           />
         </View>
       </View>
