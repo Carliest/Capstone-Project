@@ -77,9 +77,11 @@ const updateLguCredentialsSchema = z.object({
 
 const trailMaterialSchema = z.object({
   title: z.string().min(1),
-  materialType: z.enum(["video", "pdf", "file", "link"]),
+  materialType: z.enum(["video", "pdf", "file", "link"]).optional(),
   resourceUrl: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
+  fileName: z.string().min(1).optional(),
+  mimeType: z.string().min(1).optional(),
 });
 
 let trailMaterialSchemaReady: Promise<void> | null = null;
@@ -104,6 +106,16 @@ function ensureTrailMaterialSchema() {
 
       await query(`
         ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS file_name TEXT;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS mime_type TEXT;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
           ALTER COLUMN manifest_id DROP NOT NULL;
       `);
     })().catch((error) => {
@@ -113,6 +125,44 @@ function ensureTrailMaterialSchema() {
   }
 
   return trailMaterialSchemaReady;
+}
+
+function normalizeMaterialType(
+  providedType: string | undefined,
+  mimeType: string | undefined,
+  fileName: string | undefined,
+  resourceUrl: string | undefined
+) {
+  const normalizedMimeType = mimeType?.trim().toLowerCase() ?? "";
+  const normalizedName = fileName?.trim().toLowerCase() ?? "";
+  const normalizedUrl = resourceUrl?.trim().toLowerCase() ?? "";
+
+  if (providedType === "link" || /^https?:\/\//i.test(normalizedUrl)) {
+    return "link" as const;
+  }
+
+  if (
+    normalizedMimeType.startsWith("video/") ||
+    /\.(mp4|mov|m4v|webm|avi|mkv|wmv|3gp|mpe?g)$/i.test(normalizedName)
+  ) {
+    return "video" as const;
+  }
+
+  if (
+    normalizedMimeType === "application/pdf" ||
+    /\.pdf$/i.test(normalizedName)
+  ) {
+    return "pdf" as const;
+  }
+
+  if (
+    normalizedMimeType.startsWith("image/") ||
+    /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(normalizedName)
+  ) {
+    return "file" as const;
+  }
+
+  return providedType ?? "file";
 }
 
 async function ensureLguProfileExists(userId: string) {
@@ -261,6 +311,8 @@ export async function listTrailMaterials(req: Request, res: Response) {
       lgu_official_id,
       title,
       material_type,
+      file_name,
+      mime_type,
       resource_url,
       description,
       created_at
@@ -313,6 +365,12 @@ export async function createTrailMaterial(req: Request, res: Response) {
   }
 
   const materialId = crypto.randomUUID();
+  const materialType = normalizeMaterialType(
+    parsed.data.materialType,
+    parsed.data.mimeType,
+    parsed.data.fileName,
+    parsed.data.resourceUrl
+  );
   let result;
   try {
     result = await query(
@@ -323,16 +381,20 @@ export async function createTrailMaterial(req: Request, res: Response) {
         lgu_official_id,
         title,
         material_type,
+        file_name,
+        mime_type,
         resource_url,
         description
-      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
       [
         materialId,
         trailId,
         authReq.auth.userId,
         parsed.data.title,
-        parsed.data.materialType,
+        materialType,
+        parsed.data.fileName ?? null,
+        parsed.data.mimeType ?? null,
         parsed.data.resourceUrl ?? null,
         parsed.data.description ?? null,
       ]

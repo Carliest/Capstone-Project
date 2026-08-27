@@ -60,6 +60,8 @@ type TrailMaterial = {
   lgu_official_id: string;
   title: string;
   material_type: "video" | "pdf" | "file" | "link" | string;
+  file_name: string | null;
+  mime_type: string | null;
   resource_url: string | null;
   description: string | null;
   created_at: string;
@@ -124,6 +126,7 @@ export function ManagementWorkspaceScreen({
   const [materialType, setMaterialType] = useState<TrailMaterial["material_type"]>("pdf");
   const [materialUrl, setMaterialUrl] = useState("");
   const [materialFileName, setMaterialFileName] = useState("");
+  const [materialMimeType, setMaterialMimeType] = useState("");
   const [materialDescription, setMaterialDescription] = useState("");
   const [isSavingMaterial, setIsSavingMaterial] = useState(false);
   const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
@@ -388,6 +391,8 @@ export function ManagementWorkspaceScreen({
             materialType,
             resourceUrl: materialUrl.trim() || undefined,
             description: materialDescription.trim() || undefined,
+            fileName: materialFileName.trim() || undefined,
+            mimeType: materialMimeType.trim() || undefined,
           },
           token
         );
@@ -396,6 +401,8 @@ export function ManagementWorkspaceScreen({
       setMaterialTitle("");
       setMaterialUrl("");
       setMaterialDescription("");
+      setMaterialFileName("");
+      setMaterialMimeType("");
       await loadMaterials(selectedTrailId.trim());
       setStatusMessage("Trail material saved and ready for every room on this trail.");
       setLastSyncedAt(Date.now());
@@ -433,8 +440,11 @@ export function ManagementWorkspaceScreen({
         return;
       }
 
+      const detectedType = detectMaterialType(asset.mimeType, asset.name);
       setMaterialUrl(asset.uri);
+      setMaterialType(detectedType);
       setMaterialFileName(asset.name ?? "Selected file");
+      setMaterialMimeType(asset.mimeType ?? "");
       setStatusMessage(`Selected ${asset.name ?? "file"} from the device.`);
       setLastSyncedAt(Date.now());
     } catch (error) {
@@ -677,6 +687,11 @@ export function ManagementWorkspaceScreen({
                         ? `Selected file: ${materialFileName}`
                         : "No device file selected yet."}
                     </Text>
+                    {materialMimeType ? (
+                      <Text style={styles.mutedText}>
+                        Detected MIME: {materialMimeType}
+                      </Text>
+                    ) : null}
                   </View>
                 )}
                 <Field
@@ -746,6 +761,8 @@ export function ManagementWorkspaceScreen({
                           <Text style={styles.itemTitle}>{material.title}</Text>
                           <Text style={styles.itemBody}>
                             {material.material_type.toUpperCase()}
+                            {material.file_name ? ` · ${material.file_name}` : ""}
+                            {material.mime_type ? ` · ${material.mime_type}` : ""}
                             {material.description ? ` · ${material.description}` : ""}
                           </Text>
                         </View>
@@ -808,6 +825,31 @@ function Field({
       />
     </View>
   );
+}
+
+function detectMaterialType(mimeType?: string | null, fileName?: string | null) {
+  const normalizedMime = mimeType?.trim().toLowerCase() ?? "";
+  const normalizedName = fileName?.trim().toLowerCase() ?? "";
+
+  if (
+    normalizedMime.startsWith("video/") ||
+    /\.(mp4|mov|m4v|webm|avi|mkv|wmv|3gp|mpeg?)$/i.test(normalizedName)
+  ) {
+    return "video" as const;
+  }
+
+  if (normalizedMime === "application/pdf" || /\.pdf$/i.test(normalizedName)) {
+    return "pdf" as const;
+  }
+
+  if (
+    normalizedMime.startsWith("image/") ||
+    /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(normalizedName)
+  ) {
+    return "file" as const;
+  }
+
+  return "file" as const;
 }
 
 const styles = StyleSheet.create({
