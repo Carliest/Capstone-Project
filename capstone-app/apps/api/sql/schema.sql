@@ -59,10 +59,26 @@ CREATE TABLE IF NOT EXISTS trail_resource_material (
   lgu_official_id UUID NOT NULL REFERENCES lgu_profile(lgu_official_id),
   title VARCHAR NOT NULL,
   material_type VARCHAR NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  file_url TEXT,
+  file_data BYTEA,
   resource_url TEXT,
   description TEXT,
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE trail_resource_material
+  ADD COLUMN IF NOT EXISTS file_name TEXT;
+
+ALTER TABLE trail_resource_material
+  ADD COLUMN IF NOT EXISTS mime_type TEXT;
+
+ALTER TABLE trail_resource_material
+  ADD COLUMN IF NOT EXISTS file_url TEXT;
+
+ALTER TABLE trail_resource_material
+  ADD COLUMN IF NOT EXISTS file_data BYTEA;
 
 ALTER TABLE trail_resource_material
   ADD COLUMN IF NOT EXISTS trail_id UUID REFERENCES trail(trail_id) ON DELETE CASCADE;

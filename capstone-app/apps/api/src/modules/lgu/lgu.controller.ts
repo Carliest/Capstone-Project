@@ -185,6 +185,111 @@ function getPublicMaterialFileUrl(req: Request, materialId: string) {
   return `${protocol}://${host}/api/lgu/materials/${materialId}/file`;
 }
 
+type ParsedUploadedFile = {
+  originalname: string;
+  mimetype: string;
+  buffer: Buffer;
+};
+
+type ParsedMultipartBody = {
+  fields: Record<string, string>;
+  file: ParsedUploadedFile | null;
+};
+
+function getMultipartBoundary(contentType: string) {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  return boundaryMatch?.[1] ?? boundaryMatch?.[2] ?? null;
+}
+
+function parseMultipartBody(body: Buffer, contentType: string): ParsedMultipartBody | null {
+  const boundary = getMultipartBoundary(contentType);
+  if (!boundary) {
+    return null;
+  }
+
+  const payload = body.toString("latin1");
+  const delimiter = `--${boundary}`;
+  const rawParts = payload.split(delimiter);
+  const fields: Record<string, string> = {};
+  let file: ParsedUploadedFile | null = null;
+
+  for (const rawPart of rawParts) {
+    const trimmedPart = rawPart.trim();
+    if (!trimmedPart || trimmedPart === "--") {
+      continue;
+    }
+
+    const part = trimmedPart.startsWith("\r\n") ? trimmedPart.slice(2) : trimmedPart;
+    const headerEndIndex = part.indexOf("\r\n\r\n");
+    if (headerEndIndex < 0) {
+      continue;
+    }
+
+    const headerLines = part.slice(0, headerEndIndex).split("\r\n");
+    const bodySection = part.slice(headerEndIndex + 4).replace(/\r\n$/, "");
+    const dispositionLine = headerLines.find((line) =>
+      /^content-disposition:/i.test(line)
+    );
+
+    if (!dispositionLine) {
+      continue;
+    }
+
+    const dispositionValue = dispositionLine.split(":").slice(1).join(":").trim();
+    const nameMatch = /name="([^"]+)"/i.exec(dispositionValue);
+    if (!nameMatch?.[1]) {
+      continue;
+    }
+
+    const filenameMatch = /filename="([^"]*)"/i.exec(dispositionValue);
+    const contentTypeLine = headerLines.find((line) => /^content-type:/i.test(line));
+    const partBuffer = Buffer.from(bodySection, "latin1");
+
+    if (filenameMatch?.[1]) {
+      file = {
+        originalname: filenameMatch[1],
+        mimetype: contentTypeLine
+          ? contentTypeLine.split(":").slice(1).join(":").trim()
+          : "application/octet-stream",
+        buffer: partBuffer,
+      };
+      continue;
+    }
+
+    fields[nameMatch[1]] = partBuffer.toString("utf8");
+  }
+
+  return { fields, file };
+}
+
+function readTrailMaterialPayload(req: Request) {
+  const contentType = req.get("content-type") ?? "";
+  const body = req.body;
+
+  if (Buffer.isBuffer(body) && /multipart\/form-data/i.test(contentType)) {
+    const multipart = parseMultipartBody(body, contentType);
+    if (!multipart) {
+      return { data: {}, file: null as ParsedUploadedFile | null };
+    }
+
+    return { data: multipart.fields, file: multipart.file };
+  }
+
+  return {
+    data: body && typeof body === "object" ? body : {},
+    file: null as ParsedUploadedFile | null,
+  };
+}
+
+function normalizeOptionalTrailMaterialField(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 async function ensureLguProfileExists(userId: string) {
   const existingProfile = await query<{ lgu_official_id: string }>(
     "SELECT lgu_official_id FROM lgu_profile WHERE lgu_official_id = $1 LIMIT 1",
@@ -352,7 +457,16 @@ export async function listTrailMaterials(req: Request, res: Response) {
 export async function createTrailMaterial(req: Request, res: Response) {
   await ensureTrailMaterialSchema();
 
-  const parsed = trailMaterialSchema.safeParse(req.body);
+  const payload = readTrailMaterialPayload(req);
+  const rawData = payload.data as Record<string, unknown>;
+  const parsed = trailMaterialSchema.safeParse({
+    title: typeof rawData.title === "string" ? rawData.title.trim() : rawData.title,
+    materialType: normalizeOptionalTrailMaterialField(rawData.materialType),
+    resourceUrl: normalizeOptionalTrailMaterialField(rawData.resourceUrl),
+    description: normalizeOptionalTrailMaterialField(rawData.description),
+    fileName: normalizeOptionalTrailMaterialField(rawData.fileName),
+    mimeType: normalizeOptionalTrailMaterialField(rawData.mimeType),
+  });
   if (!parsed.success) {
     return sendError(res, "Invalid trail material payload", 400, parsed.error.flatten());
   }
@@ -392,7 +506,7 @@ export async function createTrailMaterial(req: Request, res: Response) {
     parsed.data.fileName,
     parsed.data.resourceUrl
   );
-  const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+  const uploadedFile = payload.file;
   const publicFileUrl = getPublicMaterialFileUrl(req, materialId);
   const normalizedFileName = parsed.data.fileName ?? uploadedFile?.originalname ?? null;
   const normalizedMimeType = parsed.data.mimeType ?? uploadedFile?.mimetype ?? null;
