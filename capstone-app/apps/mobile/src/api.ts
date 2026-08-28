@@ -23,10 +23,12 @@ export function createApiClient(baseUrl: string) {
     options: RequestInit = {},
     token?: string
   ): Promise<T> {
+    const isFormData =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
     const response = await fetch(`${normalizedBaseUrl}${path}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers ?? {}),
       },

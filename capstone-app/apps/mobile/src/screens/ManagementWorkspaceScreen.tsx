@@ -384,16 +384,42 @@ export function ManagementWorkspaceScreen({
     setStatusMessage("");
     try {
       await runWithSyncTracking(async () => {
+        if (materialType === "link") {
+          await apiClient!.post(
+            `/api/lgu/trails/${encodeURIComponent(selectedTrailId.trim())}/materials`,
+            {
+              title: materialTitle.trim(),
+              materialType,
+              resourceUrl: materialUrl.trim() || undefined,
+              description: materialDescription.trim() || undefined,
+            },
+            token
+          );
+          return;
+        }
+
+        if (!materialUrl.trim()) {
+          throw new Error("Please pick a file from the device.");
+        }
+
+        const formData = new FormData();
+        formData.append("title", materialTitle.trim());
+        formData.append("materialType", materialType);
+        formData.append("description", materialDescription.trim());
+        formData.append("fileName", materialFileName.trim() || "uploaded-file");
+        formData.append("mimeType", materialMimeType.trim() || "application/octet-stream");
+        formData.append(
+          "file",
+          {
+            uri: materialUrl.trim(),
+            name: materialFileName.trim() || "uploaded-file",
+            type: materialMimeType.trim() || "application/octet-stream",
+          } as unknown as Blob
+        );
+
         await apiClient!.post(
           `/api/lgu/trails/${encodeURIComponent(selectedTrailId.trim())}/materials`,
-          {
-            title: materialTitle.trim(),
-            materialType,
-            resourceUrl: materialUrl.trim() || undefined,
-            description: materialDescription.trim() || undefined,
-            fileName: materialFileName.trim() || undefined,
-            mimeType: materialMimeType.trim() || undefined,
-          },
+          formData,
           token
         );
       });

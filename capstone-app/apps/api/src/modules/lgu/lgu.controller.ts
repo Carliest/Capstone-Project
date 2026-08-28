@@ -121,6 +121,11 @@ function ensureTrailMaterialSchema() {
 
       await query(`
         ALTER TABLE trail_resource_material
+          ADD COLUMN IF NOT EXISTS file_data BYTEA;
+      `);
+
+      await query(`
+        ALTER TABLE trail_resource_material
           ALTER COLUMN manifest_id DROP NOT NULL;
       `);
     })().catch((error) => {
@@ -168,6 +173,16 @@ function normalizeMaterialType(
   }
 
   return providedType ?? "file";
+}
+
+function getPublicMaterialFileUrl(req: Request, materialId: string) {
+  const host = req.get("host")?.trim();
+  if (!host) {
+    return `/api/lgu/materials/${materialId}/file`;
+  }
+
+  const protocol = req.protocol || "https";
+  return `${protocol}://${host}/api/lgu/materials/${materialId}/file`;
 }
 
 async function ensureLguProfileExists(userId: string) {
@@ -377,6 +392,16 @@ export async function createTrailMaterial(req: Request, res: Response) {
     parsed.data.fileName,
     parsed.data.resourceUrl
   );
+  const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+  const publicFileUrl = getPublicMaterialFileUrl(req, materialId);
+  const normalizedFileName = parsed.data.fileName ?? uploadedFile?.originalname ?? null;
+  const normalizedMimeType = parsed.data.mimeType ?? uploadedFile?.mimetype ?? null;
+  const fileBuffer = uploadedFile?.buffer ?? null;
+
+  if (materialType !== "link" && !uploadedFile) {
+    return sendError(res, "A file upload is required for this material type", 400);
+  }
+
   let result;
   try {
     result = await query(
@@ -390,9 +415,10 @@ export async function createTrailMaterial(req: Request, res: Response) {
         file_name,
         mime_type,
         file_url,
+        file_data,
         resource_url,
         description
-      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *`,
       [
         materialId,
@@ -400,9 +426,10 @@ export async function createTrailMaterial(req: Request, res: Response) {
         authReq.auth.userId,
         parsed.data.title,
         materialType,
-        parsed.data.fileName ?? null,
-        parsed.data.mimeType ?? null,
-        parsed.data.resourceUrl ?? null,
+        normalizedFileName,
+        normalizedMimeType,
+        publicFileUrl,
+        fileBuffer,
         parsed.data.resourceUrl ?? null,
         parsed.data.description ?? null,
       ]
@@ -416,6 +443,49 @@ export async function createTrailMaterial(req: Request, res: Response) {
   }
 
   return sendSuccess(res, { trailMaterial: result.rows[0] }, 201);
+}
+
+export async function getTrailMaterialFile(req: Request, res: Response) {
+  await ensureTrailMaterialSchema();
+
+  const materialId = String(req.params.materialId ?? "").trim();
+  if (!materialId) {
+    return sendError(res, "Material ID is required", 400);
+  }
+
+  const result = await query<{
+    trail_material_id: string;
+    file_name: string | null;
+    mime_type: string | null;
+    file_data: Buffer | null;
+    resource_url: string | null;
+  }>(
+    `SELECT trail_material_id, file_name, mime_type, file_data, resource_url
+     FROM trail_resource_material
+     WHERE trail_material_id = $1
+     LIMIT 1`,
+    [materialId]
+  );
+
+  const material = result.rows[0];
+  if (!material) {
+    return sendError(res, "Material not found", 404);
+  }
+
+  if (!material.file_data) {
+    if (material.resource_url) {
+      return res.redirect(material.resource_url);
+    }
+
+    return sendError(res, "No file is attached to this material", 404);
+  }
+
+  res.setHeader("Content-Type", material.mime_type ?? "application/octet-stream");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${(material.file_name ?? "file").replace(/"/g, '\\"')}"`
+  );
+  return res.send(material.file_data);
 }
 
 export async function createTrail(req: Request, res: Response) {

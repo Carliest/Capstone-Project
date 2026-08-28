@@ -55,6 +55,9 @@ export type ManifestTrailMaterial = {
   lgu_official_id: string;
   title: string;
   material_type: "video" | "pdf" | "file" | "link" | string;
+  file_name?: string | null;
+  mime_type?: string | null;
+  file_url?: string | null;
   resource_url: string | null;
   description: string | null;
   created_at: string;

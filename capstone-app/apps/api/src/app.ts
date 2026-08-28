@@ -16,6 +16,7 @@ import { errorMiddleware } from "./middlewares/error.middleware";
 
 export const app = express();
 
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 

@@ -92,6 +92,9 @@ async function getTrailMaterialsForManifest(manifestId: string) {
       lgu_official_id: string;
       title: string;
       material_type: string;
+      file_name: string | null;
+      mime_type: string | null;
+      file_url: string | null;
       resource_url: string | null;
       description: string | null;
       created_at: string;
@@ -105,6 +108,9 @@ async function getTrailMaterialsForManifest(manifestId: string) {
     lgu_official_id: string;
     title: string;
     material_type: string;
+    file_name: string | null;
+    mime_type: string | null;
+    file_url: string | null;
     resource_url: string | null;
     description: string | null;
     created_at: string;
@@ -116,6 +122,9 @@ async function getTrailMaterialsForManifest(manifestId: string) {
       lgu_official_id,
       title,
       material_type,
+      file_name,
+      mime_type,
+      file_url,
       resource_url,
       description,
       created_at
@@ -911,6 +920,21 @@ export async function createManifestTrailMaterial(req: Request, res: Response) {
     return sendError(res, "Trail not found", 404);
   }
 
+  await query(`
+    ALTER TABLE trail_resource_material
+      ADD COLUMN IF NOT EXISTS file_name TEXT;
+  `);
+
+  await query(`
+    ALTER TABLE trail_resource_material
+      ADD COLUMN IF NOT EXISTS mime_type TEXT;
+  `);
+
+  await query(`
+    ALTER TABLE trail_resource_material
+      ADD COLUMN IF NOT EXISTS file_url TEXT;
+  `);
+
   const materialId = crypto.randomUUID();
   const result = await query(
     `INSERT INTO trail_resource_material (
@@ -920,9 +944,10 @@ export async function createManifestTrailMaterial(req: Request, res: Response) {
       lgu_official_id,
       title,
       material_type,
+      file_url,
       resource_url,
       description
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *`,
     [
       materialId,
@@ -931,6 +956,7 @@ export async function createManifestTrailMaterial(req: Request, res: Response) {
       authReq.auth.userId,
       parsed.data.title,
       parsed.data.materialType,
+      parsed.data.resourceUrl ?? null,
       parsed.data.resourceUrl ?? null,
       parsed.data.description ?? null,
     ]

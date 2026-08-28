@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { BadgeCheck, ChevronRight, FileText, MapPin, Mountain, Users } from "lucide-react-native";
 import { createApiClient } from "../api";
 import { EventHeroSection } from "../components/EventHeroSection";
@@ -692,15 +692,26 @@ function MaterialList({ items }: { items: ManifestTrailMaterial[] }) {
   return (
     <View style={styles.stackGap}>
       {items.map((item) => (
-        <ManifestListCard
+        <Pressable
           key={item.trail_material_id}
-          icon={<FileText size={16} color="#c8892a" strokeWidth={2.2} />}
-          accent="#c8892a"
-          title={item.title}
-          subtitle={item.material_type.toUpperCase()}
-          body={item.description ?? item.resource_url ?? "No description provided."}
-          badge={item.material_type}
-        />
+          onPress={() => void openMaterialResource(item)}
+          style={({ pressed }) => [pressed && styles.cardPressed]}
+        >
+          <ManifestListCard
+            icon={<FileText size={16} color="#c8892a" strokeWidth={2.2} />}
+            accent="#c8892a"
+            title={item.title}
+            subtitle={item.material_type.toUpperCase()}
+            body={
+              item.description ??
+              item.file_name ??
+              item.file_url ??
+              item.resource_url ??
+              "No description provided."
+            }
+            badge={item.material_type}
+          />
+        </Pressable>
       ))}
     </View>
   );
@@ -817,6 +828,27 @@ function fileNameFromUrl(url: string) {
     return value ?? "Uploaded file";
   } catch {
     return "Uploaded file";
+  }
+}
+
+async function openMaterialResource(item: ManifestTrailMaterial) {
+  const candidate =
+    item.file_url ??
+    item.resource_url ??
+    null;
+
+  if (!candidate) {
+    Alert.alert("Unavailable", "This material does not have an accessible file yet.");
+    return;
+  }
+
+  try {
+    await Linking.openURL(candidate);
+  } catch {
+    Alert.alert(
+      "Can't open file",
+      "This file link is not accessible on this device yet. If it is a local file path, it must be stored on the same device or uploaded to shared storage first."
+    );
   }
 }
 

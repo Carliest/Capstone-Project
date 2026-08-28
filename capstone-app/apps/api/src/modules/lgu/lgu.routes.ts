@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { authenticateToken, requireRole } from "../../middlewares/auth.middleware";
 import {
   approveManifest,
@@ -15,17 +16,25 @@ import {
   listTrails,
   submitLguAccessRequest,
   updateOwnLguCredentials,
+  getTrailMaterialFile,
 } from "./lgu.controller";
 
 const router = Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+  },
+});
 
 router.post("/access-requests", submitLguAccessRequest);
+router.get("/materials/:materialId/file", getTrailMaterialFile);
 router.get("/mountains", authenticateToken, requireRole(["lgu_official"]), listMountains);
 router.post("/mountains", authenticateToken, requireRole(["lgu_official"]), createMountain);
 router.get("/trails", authenticateToken, requireRole(["lgu_official"]), listTrails);
 router.post("/trails", authenticateToken, requireRole(["lgu_official"]), createTrail);
 router.get("/trails/:trailId/materials", authenticateToken, requireRole(["lgu_official"]), listTrailMaterials);
-router.post("/trails/:trailId/materials", authenticateToken, requireRole(["lgu_official"]), createTrailMaterial);
+router.post("/trails/:trailId/materials", authenticateToken, requireRole(["lgu_official"]), upload.single("file"), createTrailMaterial);
 router.get("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), listCheckpointStations);
 router.post("/checkpoint-stations", authenticateToken, requireRole(["lgu_official"]), createCheckpointStation);
 router.get("/guides", authenticateToken, requireRole(["lgu_official"]), listGuides);
