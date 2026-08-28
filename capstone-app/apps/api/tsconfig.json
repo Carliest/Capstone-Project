@@ -5,7 +5,7 @@
     "module": "Node16",
     "moduleResolution": "Node16",
     "esModuleInterop": true,
-    "types": ["node"],
+    "types": ["node", "multer"],
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
